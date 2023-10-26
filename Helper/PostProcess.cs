@@ -6,7 +6,7 @@ namespace yolov7DotNet.Helper;
 public class PostProcess
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static DenseTensor<float> Xyxy2Xywh(DenseTensor<float> inputs, DenseTensor<float> dim)
+    internal static DenseTensor<float> Xyxy2Xywh(DenseTensor<float> inputs, DenseTensor<float> dim)
     {
         DenseTensor<float> feed = new DenseTensor<float>(inputs.Dimensions);
         feed[0] = ((inputs[0] + inputs[2]) / 2) / dim[1];
@@ -17,7 +17,7 @@ public class PostProcess
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int[] Xyxy2Xywh(int[] inputs, int[] dim)
+    internal static int[] Xyxy2Xywh(int[] inputs, int[] dim)
     {
         int[] feed = new int[inputs.Length];
         feed[0] = ((inputs[0] + inputs[2]) / 2) / dim[1];
@@ -38,7 +38,7 @@ public class PostProcess
     /// <param name="confThres"></param>
     /// <returns></returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static List<Models.Yolov7Predict> End2End(DenseTensor<float> modelPreds, List<int[]> imageShape,
+    internal static List<Models.Yolov7Predict> End2End(DenseTensor<float> modelPreds, List<int[]> imageShape,
         List<float[]> dwdhs, List<float[]> ratios, string[] names, float confThres = 0.2f)
     {
         List<Models.Yolov7Predict> yolov7Predicts = new List<Models.Yolov7Predict>();

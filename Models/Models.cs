@@ -52,7 +52,7 @@ public class Models
         private List<float[]> Ratios { get; set; }
 
         /// <summary>
-        /// init prediction object that hold all prediction at one
+        /// init an object that hold all prediction at one
         /// </summary>
         /// <param name="predictionArrayResults"></param>
         /// <param name="categories"></param>
@@ -76,11 +76,11 @@ public class Models
         {
             List<Yolov7Predict> yolov7Predicts = new List<Yolov7Predict>();
 
-            int lenght = PredictionArrays.Length;
-            if (lenght > 0)
+            int length = PredictionArrays.Length;
+            if (length > 0)
             {
-                lenght /= 7;
-                Parallel.For(0, lenght, i =>
+                length /= 7;
+                Parallel.For(0, length, i =>
                 {
                     int end = i + 7;
                     float[] slice = PredictionArrays[i..end];
@@ -119,9 +119,9 @@ public class Models
     /// <param name="inputs"></param>
     /// <param name="dim"></param>
     /// <returns></returns>
-    private static int[] Xyxy2Xywh(int[] inputs, int[] dim)
+    private static int[] Xyxy2Xywh(IReadOnlyList<int> inputs, IReadOnlyList<int> dim)
     {
-        int[] feed = new int[inputs.Length];
+        var feed = new int[inputs.Count];
         feed[0] = ((inputs[0] + inputs[2]) / 2) / dim[1];
         feed[1] = ((inputs[1] + inputs[3]) / 2) / dim[0];
         feed[2] = (inputs[2] - inputs[0]) / dim[1];

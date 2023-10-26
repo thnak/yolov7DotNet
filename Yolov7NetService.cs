@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
 using yolov7DotNet.Helper;
 
 namespace yolov7DotNet;
@@ -41,6 +43,8 @@ public class Yolov7NetService
         Task<List<Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image);
         Task<List<Models.Yolov7Predict>> InferenceAsync(string fileDir);
         Task<List<Models.Yolov7Predict>> InferenceAsync(Stream stream);
+        Task<List<Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor);
+        List<string> GetAvailableProviders();
     }
 
     /// <summary>
@@ -52,7 +56,7 @@ public class Yolov7NetService
         private readonly SessionOptions _sessionOptions;
         private readonly InferenceSession _session;
         private readonly RunOptions _runOptions;
-        private readonly HashSet<string> _categories;
+        private readonly List<string> _categories;
         private readonly IEnumerable<string> _inputNames;
         private readonly IReadOnlyList<string> _outputNames;
         private int Stride { get; set; }
@@ -61,20 +65,49 @@ public class Yolov7NetService
 
         private readonly int[] _inputShape;
         private readonly IJSRuntime? _jsRuntime;
+        private readonly ILogger<Yolov7>? _logger;
 
-        /// <summary>
-        /// init new prediction session
-        /// </summary>
-        /// <param name="jsRuntime">optional for blazor</param>
-        /// <param name="weight">model in this project</param>
-        /// <param name="byteWeight">you can use your own model with this argument, make sure it include NMS and output shape is tensor: float32[Concatoutput_dim_0,7]</param>
-        /// <exception cref="Exception">can not init for some reason</exception>
-        public Yolov7(IJSRuntime? jsRuntime = null, ModelWeights? weight = null,
-            byte[]? byteWeight = null)
+        public Yolov7(ModelWeights modelWeights) : this(weight: modelWeights, jsRuntime: null, byteWeight: null)
+        {
+        }
+
+        public Yolov7(ModelWeights modelWeights, JSRuntime jsRuntime) : this(weight: modelWeights, jsRuntime: jsRuntime, byteWeight: null)
+        {
+        }
+
+        public Yolov7(ModelWeights modelWeights, ILogger<Yolov7> logger) : this(weight: modelWeights, jsRuntime: null, byteWeight: null, logger: logger)
+        {
+        }
+
+        //
+        public Yolov7(byte[] modelWeights) : this(byteWeight: modelWeights, jsRuntime: null, logger: null)
+        {
+        }
+
+        public Yolov7(byte[] modelWeights, JSRuntime jsRuntime) : this(byteWeight: modelWeights, jsRuntime: jsRuntime, logger: null)
+        {
+        }
+
+        public Yolov7(byte[] modelWeights, ILogger<Yolov7> logger) : this(byteWeight: modelWeights, jsRuntime: null, logger: logger)
+        {
+        }
+
+        //
+        public Yolov7(IJSRuntime? jsRuntime = null, ModelWeights? weight = null, byte[]? byteWeight = null) : this(jsRuntime: jsRuntime, logger: null, weight: weight, byteWeight: byteWeight)
+        {
+        }
+
+
+        public Yolov7(IJSRuntime? jsRuntime = null, ILogger<Yolov7>? logger = null, ModelWeights? weight = null, byte[]? byteWeight = null)
         {
             if (jsRuntime != null)
             {
                 _jsRuntime = jsRuntime;
+            }
+
+            if (logger != null)
+            {
+                _logger = logger;
             }
 
             _sessionOptions = new SessionOptions();
@@ -84,7 +117,6 @@ public class Yolov7NetService
             _sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
             _sessionOptions.ExecutionMode = ExecutionMode.ORT_PARALLEL;
             var availableProvider = OrtEnv.Instance().GetAvailableProviders()[0];
-
 
             switch (availableProvider)
             {
@@ -98,7 +130,7 @@ public class Yolov7NetService
                     };
                     providerOptions.UpdateOptions(providerOptionsDict);
                     _sessionOptions.AppendExecutionProvider_CUDA(providerOptions);
-                    JsLogger($"[{_prefix}][INIT][CUDAExecutionProvider]");
+                    TheLogger($"[{_prefix}][INIT][CUDAExecutionProvider]");
                     break;
                 }
                 case "TensorrtExecutionProvider":
@@ -117,29 +149,29 @@ public class Yolov7NetService
                     };
                     provider.UpdateOptions(providerOptionsDict);
                     _sessionOptions.AppendExecutionProvider_Tensorrt(provider);
-                    JsLogger($"[{_prefix}][INIT][TensorrtExecutionProvider]");
+                    TheLogger($"[{_prefix}][INIT][TensorrtExecutionProvider]");
 
                     break;
                 }
                 case "DNNLExecutionProvider":
                 {
                     _sessionOptions.AppendExecutionProvider_Dnnl();
+                    TheLogger($"[{_prefix}][INIT][DNNLExecutionProvider]");
                     break;
                 }
                 case "OpenVINOExecutionProvider":
                 {
                     _sessionOptions.AppendExecutionProvider_OpenVINO();
                     _sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_DISABLE_ALL;
-                    JsLogger($"[{_prefix}][INIT][OpenVINOExecutionProvider]");
+                    TheLogger($"[{_prefix}][INIT][OpenVINOExecutionProvider]");
 
                     break;
                 }
                 case "DmlExecutionProvider":
                 {
                     _sessionOptions.EnableMemoryPattern = false;
-                    _sessionOptions.AppendExecutionProvider_DML();
-                    JsLogger($"[{_prefix}][INIT][DmlExecutionProvider]");
-
+                    _sessionOptions.AppendExecutionProvider_DML(0);
+                    TheLogger($"[{_prefix}][INIT][DmlExecutionProvider]");
                     break;
                 }
                 case "ROCMExecutionProvider":
@@ -152,7 +184,7 @@ public class Yolov7NetService
                     };
                     provider.UpdateOptions(providerOptionsDict);
                     _sessionOptions.AppendExecutionProvider_ROCm(provider);
-                    JsLogger($"[{_prefix}][INIT][ROCMExecutionProvider]");
+                    TheLogger($"[{_prefix}][INIT][ROCMExecutionProvider]");
 
                     break;
                 }
@@ -167,19 +199,19 @@ public class Yolov7NetService
                 {
                     case ModelWeights.Yolov7:
                     {
-                        JsLogger($"[{_prefix}][INIT][ModelWeights][yolov7]");
+                        TheLogger($"[{_prefix}][INIT][ModelWeights][yolov7]");
                         break;
                     }
                     case ModelWeights.Yolov7Tiny:
                     {
                         _session = new InferenceSession(Properties.Resources.yolov7_tiny, _sessionOptions, prepackedWeightsContainer);
-                        JsLogger($"[{_prefix}][INIT][ModelWeights][yolov7_tiny]");
+                        TheLogger($"[{_prefix}][INIT][ModelWeights][yolov7_tiny]");
                         break;
                     }
                     default:
                     {
                         _session = new InferenceSession(Properties.Resources.yolov7_tiny, _sessionOptions, prepackedWeightsContainer);
-                        JsLogger($"[{_prefix}][INIT][ModelWeights][yolov7_tiny]");
+                        TheLogger($"[{_prefix}][INIT][ModelWeights][yolov7_tiny]");
                         break;
                     }
                 }
@@ -187,50 +219,51 @@ public class Yolov7NetService
             else if (byteWeight is not null)
             {
                 _session = new InferenceSession(byteWeight, _sessionOptions, prepackedWeightsContainer);
-                JsLogger($"[{_prefix}][INIT][ModelWeights][byte model]");
+                TheLogger($"[{_prefix}][INIT][ModelWeights][byte model]");
             }
 
             else
             {
                 _session = new InferenceSession(Properties.Resources.yolov7_tiny, _sessionOptions, prepackedWeightsContainer);
-                JsLogger($"[{_prefix}][INIT][ModelWeights][yolov7_tiny]");
+                TheLogger($"[{_prefix}][INIT][ModelWeights][yolov7_tiny]");
             }
 
             var metadata = _session?.ModelMetadata;
             var customMetadata = metadata?.CustomMetadataMap;
-            if (customMetadata != null && customMetadata.TryGetValue("names", out var categories))
+            Debug.Assert(customMetadata != null, nameof(customMetadata) + " != null");
+            if (customMetadata.TryGetValue("names", out var categories))
             {
                 var content = JsonSerializer.Deserialize<List<string>>(categories);
-                if (content != null) _categories = new HashSet<string>(content);
+                if (content != null) _categories = content;
                 else
                 {
-                    JsLogger($"[{_prefix}][Init][ERROR] not found categories in model metadata, creating name with syntax Named[?]");
-                    _categories = new HashSet<string>();
+                    TheLogger($"[{_prefix}][Init][ERROR] not found categories in model metadata, creating name with syntax Named[?]");
+                    _categories = new List<string>();
                     for (var i = 0; i < 10000; i++)
                     {
-                        _categories.Add($"Named[{i}]");
+                        _categories.Add($"Named[ {i} ]");
                     }
                 }
             }
             else
             {
-                JsLogger($"[{_prefix}][Init][ERROR] not found categories in model metadata, creating name with syntax Named[?]");
-                _categories = new HashSet<string>();
+                TheLogger($"[{_prefix}][Init][ERROR] not found categories in model metadata, creating name with syntax Named[?]");
+                _categories = new List<string>();
                 for (var i = 0; i < 10000; i++)
                 {
-                    _categories.Add($"Named[{i}]");
+                    _categories.Add($"Named[ {i} ]");
                 }
             }
 
-            if (customMetadata != null && customMetadata.TryGetValue("stride", out string? stride))
+            if (customMetadata.TryGetValue("stride", out string? stride))
             {
-                var content = JsonSerializer.Deserialize<List<int>>(stride);
-                if (content != null) Stride = content.Last();
+                var content = JsonSerializer.Deserialize<List<float>>(stride);
+                if (content != null) Stride = (int)content.Last();
             }
             else
             {
                 Stride = 32;
-                JsLogger($"[{_prefix}][Init][ERROR][STRIDE] not found stride, set to default 32");
+                TheLogger($"[{_prefix}][Init][ERROR][STRIDE] not found stride, set to default 32");
             }
 
             if (_session != null)
@@ -257,7 +290,7 @@ public class Yolov7NetService
         /// <returns></returns>
         public async Task<List<Models.Yolov7Predict>> InferenceAsync(byte[] byteArray)
         {
-            Image<Rgb24> image = Image.Load<Rgb24>(byteArray);
+            using var image = Image.Load<Rgb24>(byteArray);
             return await InferenceAsync(image);
         }
 
@@ -268,7 +301,7 @@ public class Yolov7NetService
         /// <returns></returns>
         public async Task<List<Models.Yolov7Predict>> InferenceAsync(MemoryStream memoryStream)
         {
-            Image<Rgb24> image = Image.Load<Rgb24>(memoryStream);
+            using var image = Image.Load<Rgb24>(memoryStream);
             return await InferenceAsync(image);
         }
 
@@ -279,7 +312,7 @@ public class Yolov7NetService
         /// <returns></returns>
         public async Task<List<Models.Yolov7Predict>> InferenceAsync(string fileDir)
         {
-            Image<Rgb24> image = Image.Load<Rgb24>(fileDir);
+            using var image = Image.Load<Rgb24>(fileDir);
             return await InferenceAsync(image);
         }
 
@@ -290,7 +323,7 @@ public class Yolov7NetService
         /// <returns></returns>
         public async Task<List<Models.Yolov7Predict>> InferenceAsync(Stream stream)
         {
-            Image<Rgb24> image = Image.Load<Rgb24>(stream);
+            using var image = Image.Load<Rgb24>(stream);
             return await InferenceAsync(image);
         }
 
@@ -301,12 +334,21 @@ public class Yolov7NetService
         /// <returns></returns>
         public async Task<List<Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image)
         {
-            var stopwatch = new Stopwatch();
-            stopwatch.Start();
+            var tensorFeed = PreProcess.Image2DenseTensor(image);
+            return await InferenceAsync(tensorFeed);
+        }
 
-            var tensorFeed = PreProcess.Image2DenseTensor(image, _inputShape.Last());
-            var imageShape = tensorFeed.Dimensions[1..].ToArray();
-            var lettered = PreProcess.LetterBox(tensorFeed, true, false, true, Stride, new[] { _inputShape[2], _inputShape[3] });
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="tensor"></param>
+        /// <returns></returns>
+        public async Task<List<Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor)
+        {
+            var imageShape = tensor.Dimensions[1..].ToArray();
+            var lettered = PreProcess.LetterBox(tensor, false, false, true, Stride, new[] { _inputShape[2], _inputShape[3] });
+
+            lettered.Item1 = Operators.Operators.Div(lettered.Item1, 255f);
 
             var letteredItem1Dim = lettered.Item1.Dimensions.ToArray();
             long[] newDim = new[] { 1L, letteredItem1Dim[0], letteredItem1Dim[1], letteredItem1Dim[2] };
@@ -315,9 +357,20 @@ public class Yolov7NetService
             var inputs = new Dictionary<string, OrtValue> { { _inputNames.First(), inputOrtValue } };
 
             using var fromResult = await Task.FromResult(_session.Run(_runOptions, inputs, _outputNames));
+
             float[] resultArrays = fromResult.First().Value.GetTensorDataAsSpan<float>().ToArray();
-            Models.Predictions predictions = new Models.Predictions(resultArrays, _categories.ToArray(), new List<float[]>() { lettered.Item3 }, new List<float[]>(){lettered.Item2}, new List<int[]>() { imageShape });
+
+            Models.Predictions predictions = new Models.Predictions(resultArrays, _categories.ToArray(), new List<float[]>() { lettered.Item3 }, new List<float[]>() { lettered.Item2 }, new List<int[]>() { imageShape });
             return predictions.GetDetect();
+        }
+
+        /// <summary>
+        /// GetAvailableProviders
+        /// </summary>
+        /// <returns></returns>
+        public List<string> GetAvailableProviders()
+        {
+            return OrtEnv.Instance().GetAvailableProviders().ToList();
         }
 
         /// <summary>
@@ -342,17 +395,26 @@ public class Yolov7NetService
                 _sessionOptions.Dispose();
                 _session.Dispose();
                 _runOptions.Dispose();
-                JsLogger("[ImageClassifyService][Dispose] disposed");
+                TheLogger("[ImageClassifyService][Dispose] disposed");
             }
 
             _disposed = true;
         }
 
-        private void JsLogger(string message)
+        /// <summary>
+        /// support for bold web and other
+        /// </summary>
+        /// <param name="message"></param>
+        private void TheLogger(string message)
         {
             if (_jsRuntime is not null)
             {
                 _jsRuntime.InvokeVoidAsync("console.log", message);
+            }
+
+            if (_logger is not null)
+            {
+                _logger.LogInformation(message);
             }
         }
     }

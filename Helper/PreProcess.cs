@@ -19,21 +19,32 @@ public class PreProcess
     public static (DenseTensor<float>, float[], float[]) LetterBox(DenseTensor<float> image,
         bool auto, bool scaleFill, bool scaleUp, int stride, int[] shapes, float[]? colors = null)
     {
-        colors ??= new[] { 0.56470588235f, 0.56470588235f, 0.56470588235f };
+        colors ??= new[] { 114f, 114f, 114f };
 
-        var oriShape = image.Dimensions; //CHW
-        int[] newShape = new[] { oriShape[0], shapes[0], shapes[1] };
+        var oriShape = image.Dimensions[1..]; //HW
+        int[] newShape = new[] { 3, shapes[0], shapes[1] };
 
         DenseTensor<float> feed = new DenseTensor<float>(dimensions: newShape);
+        // fill feed with special color
+        Parallel.For(0, newShape[1], x =>
+        {
+            for (int y = 0; y < newShape[2]; y++)
+            {
+                feed[0, x, y] = colors[0];
+                feed[1, x, y] = colors[1];
+                feed[2, x, y] = colors[2];
+            }
+        });
 
-        float r = Math.Min((float)shapes[0] / oriShape[1], (float)shapes[1] / oriShape[2]);
+
+        float r = Math.Min((float)shapes[0] / oriShape[0], (float)shapes[1] / oriShape[1]);
         if (!scaleUp)
         {
             r = Math.Min(r, 1.0f);
         }
 
         float[] ratio = new[] { r, r };
-        int[] newUnPad = new[] { (int)Math.Round(oriShape[1] * r), (int)Math.Round(oriShape[2] * r) };
+        int[] newUnPad = new[] { (int)Math.Round(oriShape[0] * r), (int)Math.Round(oriShape[1] * r) };
         float[] dhdw = new[] { shapes[0] - newUnPad[0], (float)(shapes[1] - newUnPad[1]) };
 
         if (auto)
@@ -55,49 +66,49 @@ public class PreProcess
             image = resize_linear(image, newUnPad);
         }
 
-        // fill feed with special color
-        Parallel.For(0, newShape[1], x =>
-        {
-            for (int y = 0; y < newShape[2]; y++)
-            {
-                feed[0, x, y] = colors[0];
-                feed[1, x, y] = colors[1];
-                feed[2, x, y] = colors[2];
-            }
-        });
-
         int left = (int)(Math.Round(dhdw[1] - 0.1));
-        int right = (int)(Math.Round(dhdw[1] + 0.1));
-
         int top = (int)(Math.Round(dhdw[0] - 0.1));
-        int bottom = (int)(Math.Round(dhdw[0] + 0.1));
 
         // implement of opencv copyMakeBorder
-        Parallel.For(bottom, image.Dimensions[1], x =>
+        Parallel.For(0, image.Dimensions[1], x =>
         {
-            for (int y = left; y < image.Dimensions[2]; y++)
+            for (int y = 0; y < image.Dimensions[2]; y++)
             {
-                feed[0, x, y] = image[0, x - bottom, y - left];
-                feed[1, x, y] = image[1, x - bottom, y - left];
-                feed[2, x, y] = image[2, x - bottom, y - left];
+                feed[0, x + top, y + left] = image[0, x, y];
+                feed[1, x + top, y + left] = image[1, x, y];
+                feed[2, x + top, y + left] = image[2, x, y];
             }
         });
+        Image<Rgb24> draw = new Image<Rgb24>(Configuration.Default, 640, 640);
+        draw.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < feed.Dimensions[1]; y++)
+            {
+                var pixelSpan = accessor.GetRowSpan(y);
+                for (var x = 0; x < feed.Dimensions[2]; x++)
+                {
+                    pixelSpan[x].R = (byte)feed[0, y, x];
+                    pixelSpan[x].G = (byte)feed[1, y, x];
+                    pixelSpan[x].B = (byte)feed[2, y, x];
+                }
+            }
+        });
+        draw.Save("D:/Documents/Dotnet/OnnxLab/yolov7-tiny.png");
         return (feed, ratio, dhdw);
     }
 
     /// <summary>
-    /// Convert ImageSharp to float32 DenseTensor in range [0, 1]
+    /// Convert ImageSharp to float32 DenseTensor
     /// </summary>
     /// <param name="image">ImageSharp</param>
     /// <param name="maxShape"></param>
     /// <returns>DenseTensor with shape 3, Height, Width</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static DenseTensor<float> Image2DenseTensor(Image<Rgb24> image, int? maxShape = null)
     {
         int[] shape = new[] { 3, image.Height, image.Width };
-        int maxDim = Math.Max(image.Height, image.Width);
         if (maxShape is not null)
         {
+            int maxDim = Math.Max(image.Height, image.Width);
             maxDim = Math.Max(maxDim, (int)maxShape);
 
             if (maxDim > maxShape)
@@ -128,9 +139,9 @@ public class PreProcess
                 var pixelSpan = accessor.GetRowSpan(y);
                 for (var x = 0; x < accessor.Width; x++)
                 {
-                    feed[0, y, x] = pixelSpan[x].R / 255f;
-                    feed[1, y, x] = pixelSpan[x].G / 255f;
-                    feed[2, y, x] = pixelSpan[x].B / 255f;
+                    feed[0, y, x] = pixelSpan[x].R;
+                    feed[1, y, x] = pixelSpan[x].G;
+                    feed[2, y, x] = pixelSpan[x].B;
                 }
             }
         });
@@ -138,15 +149,15 @@ public class PreProcess
         return feed;
     }
 
+   
+
     /// <summary>
     /// https://stackoverflow.com/a/69157357/22634632 image resize with numpy
     /// </summary>
     /// <param name="image"></param>
     /// <param name="shape"></param>
     /// <returns></returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public
-        static DenseTensor<float> resize_linear(DenseTensor<float> imageMatrix, int[] shape)
+    public static DenseTensor<float> resize_linear(DenseTensor<float> imageMatrix, int[] shape)
     {
         int[] newShape = new[] { 3, shape[0], shape[1] };
         DenseTensor<float> outputImage = new DenseTensor<float>(newShape);
@@ -185,7 +196,6 @@ public class PreProcess
                 var rightLowerG = imageMatrix[1, (int)Math.Min(dim[1] - 1, Math.Ceiling(oldY)), (int)Math.Min(dim[2] - 1, Math.Ceiling(oldX))];
                 var rightLowerB = imageMatrix[2, (int)Math.Min(dim[1] - 1, Math.Ceiling(oldY)), (int)Math.Min(dim[2] - 1, Math.Ceiling(oldX))];
 
-
                 var blendTopR = (float)(rightUpperR * xFraction + leftUpperR * (1.0 - xFraction));
                 var blendTopG = (float)(rightUpperG * xFraction + leftUpperG * (1.0 - xFraction));
                 var blendTopB = (float)(rightUpperB * xFraction + leftUpperB * (1.0 - xFraction));
@@ -193,7 +203,6 @@ public class PreProcess
                 var blendBottomR = (float)(rightLowerR * xFraction + leftLowerR * (1.0 - xFraction));
                 var blendBottomG = (float)(rightLowerG * xFraction + leftLowerG * (1.0 - xFraction));
                 var blendBottomB = (float)(rightLowerB * xFraction + leftLowerB * (1.0 - xFraction));
-
 
                 var finalBlendR = (float)(blendTopR * yFraction + blendBottomR * (1.0 - yFraction));
                 var finalBlendG = (float)(blendTopG * yFraction + blendBottomG * (1.0 - yFraction));
@@ -212,14 +221,14 @@ public class PreProcess
     /// </summary>
     /// <param name="tensor"></param>
     /// <returns></returns>
-    public static DenseTensor<float> ExpandDim(DenseTensor<float> tensor)
+    internal static DenseTensor<float> ExpandDim(DenseTensor<float> tensor)
     {
         int height = tensor.Dimensions[1];
         int width = tensor.Dimensions[2];
         int[] shape = new[] { 1, 3, height, width };
 
         DenseTensor<float> denseTensor = new DenseTensor<float>(shape);
-        
+
         if (height == width)
         {
             Parallel.For(0, height, i =>
