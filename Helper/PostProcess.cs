@@ -38,10 +38,10 @@ public class PostProcess
     /// <param name="confThres"></param>
     /// <returns></returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static List<Models.Yolov7Predict> End2End(DenseTensor<float> modelPreds, List<int[]> imageShape,
+    internal static List<Models.Models.Yolov7Predict> End2End(DenseTensor<float> modelPreds, List<int[]> imageShape,
         List<float[]> dwdhs, List<float[]> ratios, string[] names, float confThres = 0.2f)
     {
-        List<Models.Yolov7Predict> yolov7Predicts = new List<Models.Yolov7Predict>();
+        List<Models.Models.Yolov7Predict> yolov7Predicts = new List<Models.Models.Yolov7Predict>();
         int firstDim = modelPreds.Dimensions[0];
 
         for (var x = 0; x < firstDim; x++)
@@ -69,7 +69,7 @@ public class PostProcess
             floatBox[3] /= doubleratio[3];
 
             int[] box = new[] { (int)Math.Round(floatBox[0]), (int)Math.Round(floatBox[1]), (int)Math.Round(floatBox[2]), (int)Math.Round(floatBox[3]) };
-            yolov7Predicts.Add(new Models.Yolov7Predict()
+            yolov7Predicts.Add(new Models.Models.Yolov7Predict()
             {
                 BatchId = batch_id, 
                 Bbox = Xyxy2Xywh(box, imageShape[batch_id]), 

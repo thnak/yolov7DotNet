@@ -67,13 +67,14 @@ public class Yolov7NetService
 
     private interface IYolov7
     {
-        Task<List<Models.Yolov7Predict>> InferenceAsync(MemoryStream memoryStream);
-        Task<List<Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image);
-        Task<List<Models.Yolov7Predict>> InferenceAsync(string fileDir);
-        Task<List<Models.Yolov7Predict>> InferenceAsync(Stream stream);
-        Task<List<Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor);
+        Task<List<Models.Models.Yolov7Predict>> InferenceAsync(MemoryStream memoryStream);
+        Task<List<Models.Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image);
+        Task<List<Models.Models.Yolov7Predict>> InferenceAsync(string fileDir);
+        Task<List<Models.Models.Yolov7Predict>> InferenceAsync(Stream stream);
+        Task<List<Models.Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor);
         List<string> GetAvailableProviders();
         void SetExcutionProvider(ExecutionProvider ex);
+        Task<float> WarmUp(int cycle, int[] shape);
     }
 
     /// <summary>
@@ -104,7 +105,7 @@ public class Yolov7NetService
         {
         }
 
-        public Yolov7(ModelWeights modelWeights, JSRuntime jsRuntime) : this(weight: modelWeights, jsRuntime: jsRuntime, byteWeight: null)
+        public Yolov7(ModelWeights modelWeights, IJSRuntime jsRuntime) : this(weight: modelWeights, jsRuntime: jsRuntime, byteWeight: null)
         {
         }
 
@@ -117,7 +118,7 @@ public class Yolov7NetService
         {
         }
 
-        public Yolov7(byte[] modelWeights, JSRuntime jsRuntime) : this(byteWeight: modelWeights, jsRuntime: jsRuntime, logger: null)
+        public Yolov7(byte[] modelWeights, IJSRuntime jsRuntime) : this(byteWeight: modelWeights, jsRuntime: jsRuntime, logger: null)
         {
         }
 
@@ -156,40 +157,32 @@ public class Yolov7NetService
                 case "CUDAExecutionProvider":
                 {
                     SetExcutionProvider(ExecutionProvider.CUDA);
-                    TheLogger($"[{_prefix}][INIT][CUDAExecutionProvider]");
                     break;
                 }
                 case "TensorrtExecutionProvider":
                 {
                     SetExcutionProvider(ExecutionProvider.TensorRT);
-                    TheLogger($"[{_prefix}][INIT][TensorrtExecutionProvider]");
-
                     break;
                 }
                 case "DNNLExecutionProvider":
                 {
                     SetExcutionProvider(ExecutionProvider.DNNL);
-                    TheLogger($"[{_prefix}][INIT][DNNLExecutionProvider]");
                     break;
                 }
                 case "OpenVINOExecutionProvider":
                 {
                     SetExcutionProvider(ExecutionProvider.OpenVINO);
-                    TheLogger($"[{_prefix}][INIT][OpenVINOExecutionProvider]");
 
                     break;
                 }
                 case "DmlExecutionProvider":
                 {
                     SetExcutionProvider(ExecutionProvider.DML);
-                    TheLogger($"[{_prefix}][INIT][DmlExecutionProvider]");
                     break;
                 }
                 case "ROCMExecutionProvider":
                 {
                     SetExcutionProvider(ExecutionProvider.ROCm);
-                    TheLogger($"[{_prefix}][INIT][ROCMExecutionProvider]");
-
                     break;
                 }
             }
@@ -292,7 +285,7 @@ public class Yolov7NetService
         /// </summary>
         /// <param name="byteArray"></param>
         /// <returns></returns>
-        public async Task<List<Models.Yolov7Predict>> InferenceAsync(byte[] byteArray)
+        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(byte[] byteArray)
         {
             using var image = Image.Load<Rgb24>(byteArray);
             return await InferenceAsync(image);
@@ -303,7 +296,7 @@ public class Yolov7NetService
         /// </summary>
         /// <param name="memoryStream"></param>
         /// <returns></returns>
-        public async Task<List<Models.Yolov7Predict>> InferenceAsync(MemoryStream memoryStream)
+        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(MemoryStream memoryStream)
         {
             using var image = Image.Load<Rgb24>(memoryStream);
             return await InferenceAsync(image);
@@ -314,7 +307,7 @@ public class Yolov7NetService
         /// </summary>
         /// <param name="fileDir"></param>
         /// <returns></returns>
-        public async Task<List<Models.Yolov7Predict>> InferenceAsync(string fileDir)
+        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(string fileDir)
         {
             using var image = Image.Load<Rgb24>(fileDir);
             return await InferenceAsync(image);
@@ -325,7 +318,7 @@ public class Yolov7NetService
         /// </summary>
         /// <param name="stream"></param>
         /// <returns></returns>
-        public async Task<List<Models.Yolov7Predict>> InferenceAsync(Stream stream)
+        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(Stream stream)
         {
             using var image = Image.Load<Rgb24>(stream);
             return await InferenceAsync(image);
@@ -336,7 +329,7 @@ public class Yolov7NetService
         /// </summary>
         /// <param name="image"></param>
         /// <returns></returns>
-        public async Task<List<Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image)
+        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image)
         {
             var tensorFeed = PreProcess.Image2DenseTensor(image);
             return await InferenceAsync(tensorFeed);
@@ -347,7 +340,7 @@ public class Yolov7NetService
         /// </summary>
         /// <param name="tensor"></param>
         /// <returns></returns>
-        public async Task<List<Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor)
+        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor)
         {
             var imageShape = tensor.Dimensions[1..].ToArray();
             var lettered = PreProcess.LetterBox(tensor, false, false, true, Stride, new[] { _inputShape[2], _inputShape[3] });
@@ -375,14 +368,31 @@ public class Yolov7NetService
             var letteredItem1Dim = lettered.Item1.Dimensions.ToArray();
             long[] newDim = new[] { 1L, letteredItem1Dim[0], letteredItem1Dim[1], letteredItem1Dim[2] };
 
-            using var inputOrtValue = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, Operators.Operators.ExpandDim(lettered.Item1).Buffer, newDim);
+            var feedTensor = Operators.Operators.ExpandDim(lettered.Item1);
+
+            return await RunNet(feedTensor, new List<float[]>() { lettered.Item3 }, new List<float[]>() { lettered.Item2 }, new List<int[]>() { imageShape });
+        }
+
+        /// <summary>
+        /// start inference and return the predictions
+        /// </summary>
+        /// <param name="tensor">4 dimension only</param>
+        /// <param name="dhdws"></param>
+        /// <param name="ratios"></param>
+        /// <param name="imageShapes"></param>
+        /// <returns></returns>
+        private async Task<List<Models.Models.Yolov7Predict>> RunNet(DenseTensor<float> tensor, List<float[]> dhdws, List<float[]> ratios, List<int[]> imageShapes)
+        {
+            long[] newDim = new[] { (long)tensor.Dimensions[0], tensor.Dimensions[1], tensor.Dimensions[2], tensor.Dimensions[3] };
+            var inputOrtValue = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, tensor.Buffer, newDim);
             var inputs = new Dictionary<string, OrtValue> { { _inputNames.First(), inputOrtValue } };
 
-            using var fromResult = await Task.FromResult(_session.Run(_runOptions, inputs, _outputNames));
+            var fromResult = await Task.FromResult(_session.Run(_runOptions, inputs, _outputNames));
 
             float[] resultArrays = fromResult.First().Value.GetTensorDataAsSpan<float>().ToArray();
-
-            Models.Predictions predictions = new Models.Predictions(resultArrays, _categories.ToArray(), new List<float[]>() { lettered.Item3 }, new List<float[]>() { lettered.Item2 }, new List<int[]>() { imageShape });
+            inputOrtValue.Dispose();
+            fromResult.Dispose();
+            Models.Models.Predictions predictions = new Models.Models.Predictions(resultArrays, _categories.ToArray(), dhdws, ratios, imageShapes);
             return predictions.GetDetect();
         }
 
@@ -402,6 +412,7 @@ public class Yolov7NetService
                 case ExecutionProvider.CPU:
                 {
                     _sessionOptions = CopyOptions(_sessionOptions);
+                    TheLogger($"[{_prefix}][INIT][CPUExecutionProvider]");
                     break;
                 }
                 case ExecutionProvider.CUDA:
@@ -415,6 +426,7 @@ public class Yolov7NetService
                     };
                     providerOptions.UpdateOptions(providerOptionsDict);
                     _sessionOptions.AppendExecutionProvider_CUDA(providerOptions);
+                    TheLogger($"[{_prefix}][INIT][CUDAExecutionProvider]");
                     break;
                 }
                 case ExecutionProvider.TensorRT:
@@ -431,6 +443,8 @@ public class Yolov7NetService
                     };
                     provider.UpdateOptions(providerOptionsDict);
                     _sessionOptions.AppendExecutionProvider_Tensorrt(provider);
+                    TheLogger($"[{_prefix}][INIT][TensorrtExecutionProvider]");
+
                     break;
                 }
                 case ExecutionProvider.Azure:
@@ -448,6 +462,8 @@ public class Yolov7NetService
                     _sessionOptions = CopyOptions(_sessionOptions);
                     _sessionOptions.EnableMemoryPattern = false;
                     _sessionOptions.AppendExecutionProvider_DML(0);
+                    TheLogger($"[{_prefix}][INIT][DmlExecutionProvider]");
+
                     break;
                 }
                 case ExecutionProvider.NNAPI:
@@ -475,6 +491,8 @@ public class Yolov7NetService
                     _sessionOptions = CopyOptions(_sessionOptions);
                     _sessionOptions.AppendExecutionProvider_OpenVINO();
                     _sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_DISABLE_ALL;
+                    TheLogger($"[{_prefix}][INIT][OpenVINOExecutionProvider]");
+
                     break;
                 }
                 case ExecutionProvider.oneDNN:
@@ -486,6 +504,8 @@ public class Yolov7NetService
                 {
                     _sessionOptions = CopyOptions(_sessionOptions);
                     _sessionOptions.AppendExecutionProvider_Dnnl();
+                    TheLogger($"[{_prefix}][INIT][DNNLExecutionProvider]");
+
                     break;
                 }
                 case ExecutionProvider.ROCm:
@@ -499,6 +519,7 @@ public class Yolov7NetService
                     };
                     provider.UpdateOptions(providerOptionsDict);
                     _sessionOptions.AppendExecutionProvider_ROCm(provider);
+                    TheLogger($"[{_prefix}][INIT][ROCMExecutionProvider]");
                     break;
                 }
             }
@@ -516,6 +537,20 @@ public class Yolov7NetService
 
                 return sessionOptions;
             }
+        }
+
+        public async Task<float> WarmUp(int cycle, int[] shape)
+        {
+            Stopwatch sw = Stopwatch.StartNew();
+            sw.Start();
+            DenseTensor<float> tensor = new DenseTensor<float>(shape);
+            for (int i = 0; i < cycle; i++)
+            {
+                await InferenceAsync(tensor);
+            }
+
+            sw.Stop();
+            return sw.ElapsedMilliseconds;
         }
 
         /// <summary>

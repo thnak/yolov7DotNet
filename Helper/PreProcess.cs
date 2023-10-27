@@ -2,7 +2,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace yolov7DotNet.Helper;
 
-public class PreProcess
+public abstract class PreProcess
 {
     /// <summary>
     /// 
@@ -78,6 +78,7 @@ public class PreProcess
                 feed[2, x + top, y + left] = image[2, x, y];
             }
         });
+        // var rever = Operators.Operators.VerticalFlip(feed);
         // Image<Rgb24> draw = new Image<Rgb24>(Configuration.Default, 640, 640);
         // draw.ProcessPixelRows(accessor =>
         // {
@@ -86,13 +87,13 @@ public class PreProcess
         //         var pixelSpan = accessor.GetRowSpan(y);
         //         for (var x = 0; x < feed.Dimensions[2]; x++)
         //         {
-        //             pixelSpan[x].R = (byte)feed[0, y, x];
-        //             pixelSpan[x].G = (byte)feed[1, y, x];
-        //             pixelSpan[x].B = (byte)feed[2, y, x];
+        //             pixelSpan[x].R = (byte)rever[0, y, x];
+        //             pixelSpan[x].G = (byte)rever[1, y, x];
+        //             pixelSpan[x].B = (byte)rever[2, y, x];
         //         }
         //     }
         // });
-        // draw.Save("D:\Documents\Dotnet\BlazorApp1\debugImage.jpg");
+        // draw.Save("D:/Documents/Dotnet/BlazorApp1/debugImage.jpg");
         return (feed, ratio, dhdw);
     }
 

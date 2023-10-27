@@ -66,6 +66,7 @@ public class Operators
         });
         return tensor1;
     }
+
     /// <summary>
     /// 
     /// </summary>
@@ -86,6 +87,7 @@ public class Operators
         });
         return tensor1.ToDenseTensor();
     }
+
     /// <summary>
     /// 
     /// </summary>
@@ -106,6 +108,7 @@ public class Operators
         });
         return tensor1;
     }
+
     /// <summary>
     /// 
     /// </summary>
@@ -147,12 +150,13 @@ public class Operators
         });
         return tensor1;
     }
+
     /// <summary>
     /// implement of numpy expandim
     /// </summary>
     /// <param name="tensor"></param>
     /// <returns></returns>
-    internal static DenseTensor<float> ExpandDim(DenseTensor<float> tensor)
+    public static DenseTensor<float> ExpandDim(DenseTensor<float> tensor)
     {
         int height = tensor.Dimensions[1];
         int width = tensor.Dimensions[2];
@@ -175,13 +179,120 @@ public class Operators
             {
                 for (int x = 0; x < width; x++)
                 {
+                    denseTensor[0, 0, i, x] = tensor[0, i, x];
                     denseTensor[0, 1, i, x] = tensor[1, i, x];
                     denseTensor[0, 2, i, x] = tensor[2, i, x];
-                    denseTensor[0, 3, i, x] = tensor[3, i, x];
                 }
             });
         }
 
         return denseTensor;
+    }
+
+    /// <summary>
+    /// only support 3 and 4 dimension
+    /// </summary>
+    /// <param name="denseTensor"></param>
+    /// <returns></returns>
+    public static DenseTensor<float> VerticalFlip(DenseTensor<float> denseTensor)
+    {
+        DenseTensor<float> tensor = new DenseTensor<float>(denseTensor.Dimensions);
+        var dim = denseTensor.Dimensions.ToArray();
+        if (dim.Length == 4)
+        {
+            for (int y = 0; y < dim[0]; y++)
+            {
+                Parallel.For(0, dim[2], i =>
+                {
+                    for (int x = 0; x < dim[3]; x++)
+                    {
+                        tensor[y, 0, i, x] = denseTensor[y, 0, dim[2] - 1 - i, x];
+                        tensor[y, 1, i, x] = denseTensor[y, 1, dim[2] - 1 - i, x];
+                        tensor[y, 2, i, x] = denseTensor[y, 2, dim[2] - 1 - i, x];
+                    }
+                });
+            }
+        }
+        else
+        {
+            Parallel.For(0, dim[1], i =>
+            {
+                for (int x = 0; x < dim[2]; x++)
+                {
+                    tensor[0, i, x] = denseTensor[0, dim[2] - 1 - i, x];
+                    tensor[1, i, x] = denseTensor[1, dim[2] - 1 - i, x];
+                    tensor[2, i, x] = denseTensor[2, dim[2] - 1 - i, x];
+                }
+            });
+        }
+
+        return tensor;
+    }
+
+    /// <summary>
+    /// only 3 and 4 dimension
+    /// </summary>
+    /// <param name="denseTensor"></param>
+    /// <returns></returns>
+    public static DenseTensor<float> HorizontalFlip(DenseTensor<float> denseTensor)
+    {
+        DenseTensor<float> tensor = new DenseTensor<float>(denseTensor.Dimensions);
+        var dim = denseTensor.Dimensions.ToArray();
+        if (dim.Length == 4)
+        {
+            for (int y = 0; y < dim[0]; y++)
+            {
+                Parallel.For(0, dim[1], i =>
+                {
+                    for (int x = 0; x < dim[3]; x++)
+                    {
+                        tensor[y, 0, i, x] = denseTensor[y, 0, i, dim[3] - 1 - x];
+                        tensor[y, 1, i, x] = denseTensor[y, 1, i, dim[3] - 1 - x];
+                        tensor[y, 2, i, x] = denseTensor[y, 2, i, dim[3] - 1 - x];
+                    }
+                });
+            }
+        }
+        else
+        {
+            Parallel.For(0, dim[2], i =>
+            {
+                for (int x = 0; x < dim[2]; x++)
+                {
+                    tensor[0, i, x] = denseTensor[0, i, dim[2] - 1 - x];
+                    tensor[1, i, x] = denseTensor[1, i, dim[2] - 1 - x];
+                    tensor[2, i, x] = denseTensor[2, i, dim[2] - 1 - x];
+                }
+            });
+        }
+
+        return tensor;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="tensors"></param>
+    /// <returns></returns>
+    public static DenseTensor<float> Concat(List<DenseTensor<float>> tensors)
+    {
+        int[] fim_first = tensors.First().Dimensions.ToArray();
+        int[] dim = new[] { tensors.Count, fim_first[0], fim_first[1], fim_first[2] };
+        DenseTensor<float> value = new DenseTensor<float>(tensors.Count);
+
+        Parallel.For(0, fim_first[1], i =>
+        {
+            for (int x = 0; x < fim_first[2]; x++)
+            {
+                for (int y = 0; y < tensors.Count; y++)
+                {
+                    value[y, 0, x, i] = tensors[y][0, x, i];
+                    value[y, 1, x, i] = tensors[y][1, x, i];
+                    value[y, 2, x, i] = tensors[y][2, x, i];
+                }
+            }
+        });
+
+        return value;
     }
 }

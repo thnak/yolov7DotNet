@@ -1,8 +1,6 @@
-using yolov7DotNet.Helper;
+namespace yolov7DotNet.Models;
 
-namespace yolov7DotNet;
-
-public class Models
+public abstract class Models
 {
     /// <summary>
     /// Base output from yolov7 non-maxsuppression

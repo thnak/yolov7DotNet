@@ -61,7 +61,7 @@ namespace yolov7DotNet.Properties {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Yolov7NetService.
+        ///   Looks up a localized string similar to Yolov7.
         /// </summary>
         internal static string prefix {
             get {
