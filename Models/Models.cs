@@ -86,16 +86,16 @@ public class Models
                     float[] slice = PredictionArrays[i..end];
                     int clsIdx = (int)slice[5];
                     int batchId = (int)slice[0];
-                    float[] floatBox = new[] { slice[1], slice[2], slice[3], slice[4] };
-                    float[] doubleratio = new[] { Ratios[batchId][0], Ratios[batchId][1], Ratios[batchId][0], Ratios[batchId][1] };
-                    float[] doubleDwdhs = new[] { Dwdhs[batchId][0], Dwdhs[batchId][1], Dwdhs[batchId][0], Dwdhs[batchId][1] };
+                    float[] boxArray = new[] { slice[1], slice[2], slice[3], slice[4] };
+                    float[] doubleRatios = new[] { Ratios[batchId][0], Ratios[batchId][1], Ratios[batchId][0], Ratios[batchId][1] };
+                    float[] doubleDwDhs = new[] { Dwdhs[batchId][0], Dwdhs[batchId][1], Dwdhs[batchId][0], Dwdhs[batchId][1] };
 
-                    floatBox[0] -= doubleDwdhs[0];
-                    floatBox[1] /= doubleratio[1];
-                    floatBox[2] -= doubleDwdhs[2];
-                    floatBox[3] /= doubleratio[3];
+                    boxArray[0] -= doubleDwDhs[0];
+                    boxArray[1] /= doubleRatios[1];
+                    boxArray[2] -= doubleDwDhs[2];
+                    boxArray[3] /= doubleRatios[3];
 
-                    int[] box = new[] { (int)Math.Round(floatBox[0]), (int)Math.Round(floatBox[1]), (int)Math.Round(floatBox[2]), (int)Math.Round(floatBox[3]) };
+                    int[] box = new[] { (int)Math.Round(boxArray[0]), (int)Math.Round(boxArray[1]), (int)Math.Round(boxArray[2]), (int)Math.Round(boxArray[3]) };
 
                     yolov7Predicts.Add(new Yolov7Predict()
                     {

@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace yolov7DotNet.Helper;
@@ -79,21 +78,21 @@ public class PreProcess
                 feed[2, x + top, y + left] = image[2, x, y];
             }
         });
-        Image<Rgb24> draw = new Image<Rgb24>(Configuration.Default, 640, 640);
-        draw.ProcessPixelRows(accessor =>
-        {
-            for (var y = 0; y < feed.Dimensions[1]; y++)
-            {
-                var pixelSpan = accessor.GetRowSpan(y);
-                for (var x = 0; x < feed.Dimensions[2]; x++)
-                {
-                    pixelSpan[x].R = (byte)feed[0, y, x];
-                    pixelSpan[x].G = (byte)feed[1, y, x];
-                    pixelSpan[x].B = (byte)feed[2, y, x];
-                }
-            }
-        });
-        draw.Save("D:/Documents/Dotnet/OnnxLab/yolov7-tiny.png");
+        // Image<Rgb24> draw = new Image<Rgb24>(Configuration.Default, 640, 640);
+        // draw.ProcessPixelRows(accessor =>
+        // {
+        //     for (var y = 0; y < feed.Dimensions[1]; y++)
+        //     {
+        //         var pixelSpan = accessor.GetRowSpan(y);
+        //         for (var x = 0; x < feed.Dimensions[2]; x++)
+        //         {
+        //             pixelSpan[x].R = (byte)feed[0, y, x];
+        //             pixelSpan[x].G = (byte)feed[1, y, x];
+        //             pixelSpan[x].B = (byte)feed[2, y, x];
+        //         }
+        //     }
+        // });
+        // draw.Save("D:\Documents\Dotnet\BlazorApp1\debugImage.jpg");
         return (feed, ratio, dhdw);
     }
 
@@ -149,7 +148,6 @@ public class PreProcess
         return feed;
     }
 
-   
 
     /// <summary>
     /// https://stackoverflow.com/a/69157357/22634632 image resize with numpy
@@ -216,41 +214,5 @@ public class PreProcess
         return outputImage;
     }
 
-    /// <summary>
-    /// implement of numpy expandim
-    /// </summary>
-    /// <param name="tensor"></param>
-    /// <returns></returns>
-    internal static DenseTensor<float> ExpandDim(DenseTensor<float> tensor)
-    {
-        int height = tensor.Dimensions[1];
-        int width = tensor.Dimensions[2];
-        int[] shape = new[] { 1, 3, height, width };
-
-        DenseTensor<float> denseTensor = new DenseTensor<float>(shape);
-
-        if (height == width)
-        {
-            Parallel.For(0, height, i =>
-            {
-                denseTensor[0, 0, i, i] = tensor[0, i, i];
-                denseTensor[0, 1, i, i] = tensor[1, i, i];
-                denseTensor[0, 2, i, i] = tensor[2, i, i];
-            });
-        }
-        else
-        {
-            Parallel.For(0, height, i =>
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    denseTensor[0, 1, i, x] = tensor[1, i, x];
-                    denseTensor[0, 2, i, x] = tensor[2, i, x];
-                    denseTensor[0, 3, i, x] = tensor[3, i, x];
-                }
-            });
-        }
-
-        return denseTensor;
-    }
+   
 }

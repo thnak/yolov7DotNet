@@ -36,6 +36,34 @@ public class Yolov7NetService
         DefaultModel
     }
 
+    public enum ExecutionProvider
+    {
+        /// <summary>
+        /// 
+        /// </summary>
+        CPU,
+
+        /// <summary>
+        /// 
+        /// </summary>
+        CUDA,
+
+        /// <summary>
+        /// 
+        /// </summary>
+        TensorRT,
+        DML,
+        OpenCL,
+        ROCm,
+        OpenVINO,
+        oneDNN,
+        QNN,
+        NNAPI,
+        CoreML,
+        XNNPACK,
+        Azure,
+        DNNL
+    }
 
     private interface IYolov7
     {
@@ -45,6 +73,7 @@ public class Yolov7NetService
         Task<List<Models.Yolov7Predict>> InferenceAsync(Stream stream);
         Task<List<Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor);
         List<string> GetAvailableProviders();
+        void SetExcutionProvider(ExecutionProvider ex);
     }
 
     /// <summary>
@@ -53,7 +82,7 @@ public class Yolov7NetService
     public class Yolov7 : IYolov7, IDisposable
     {
         private readonly string _prefix = Properties.Resources.prefix;
-        private readonly SessionOptions _sessionOptions;
+        private SessionOptions _sessionOptions;
         private readonly InferenceSession _session;
         private readonly RunOptions _runOptions;
         private readonly List<string> _categories;
@@ -66,6 +95,10 @@ public class Yolov7NetService
         private readonly int[] _inputShape;
         private readonly IJSRuntime? _jsRuntime;
         private readonly ILogger<Yolov7>? _logger;
+
+        public Yolov7() : this(weight: ModelWeights.Yolov7Tiny, jsRuntime: null, byteWeight: null)
+        {
+        }
 
         public Yolov7(ModelWeights modelWeights) : this(weight: modelWeights, jsRuntime: null, byteWeight: null)
         {
@@ -122,68 +155,39 @@ public class Yolov7NetService
             {
                 case "CUDAExecutionProvider":
                 {
-                    OrtCUDAProviderOptions providerOptions = new OrtCUDAProviderOptions();
-                    var providerOptionsDict = new Dictionary<string, string>
-                    {
-                        ["cudnn_conv_use_max_workspace"] = "1",
-                        ["device_id"] = "0"
-                    };
-                    providerOptions.UpdateOptions(providerOptionsDict);
-                    _sessionOptions.AppendExecutionProvider_CUDA(providerOptions);
+                    SetExcutionProvider(ExecutionProvider.CUDA);
                     TheLogger($"[{_prefix}][INIT][CUDAExecutionProvider]");
                     break;
                 }
                 case "TensorrtExecutionProvider":
                 {
-                    OrtTensorRTProviderOptions provider = new OrtTensorRTProviderOptions();
-                    string result = Path.GetTempPath();
-                    string temPath = Path.Combine(result, $"_yolov7NetService_{weight}.engine");
-                    var providerOptionsDict = new Dictionary<string, string>
-                    {
-                        ["cudnn_conv_use_max_workspace"] = "1",
-                        ["device_id"] = "0",
-                        ["ORT_TENSORRT_FP16_ENABLE"] = "true",
-                        ["ORT_TENSORRT_LAYER_NORM_FP32_FALLBACK"] = "true",
-                        ["ORT_TENSORRT_ENGINE_CACHE_ENABLE"] = "true",
-                        ["ORT_TENSORRT_CACHE_PATH"] = $"{temPath}"
-                    };
-                    provider.UpdateOptions(providerOptionsDict);
-                    _sessionOptions.AppendExecutionProvider_Tensorrt(provider);
+                    SetExcutionProvider(ExecutionProvider.TensorRT);
                     TheLogger($"[{_prefix}][INIT][TensorrtExecutionProvider]");
 
                     break;
                 }
                 case "DNNLExecutionProvider":
                 {
-                    _sessionOptions.AppendExecutionProvider_Dnnl();
+                    SetExcutionProvider(ExecutionProvider.DNNL);
                     TheLogger($"[{_prefix}][INIT][DNNLExecutionProvider]");
                     break;
                 }
                 case "OpenVINOExecutionProvider":
                 {
-                    _sessionOptions.AppendExecutionProvider_OpenVINO();
-                    _sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_DISABLE_ALL;
+                    SetExcutionProvider(ExecutionProvider.OpenVINO);
                     TheLogger($"[{_prefix}][INIT][OpenVINOExecutionProvider]");
 
                     break;
                 }
                 case "DmlExecutionProvider":
                 {
-                    _sessionOptions.EnableMemoryPattern = false;
-                    _sessionOptions.AppendExecutionProvider_DML(0);
+                    SetExcutionProvider(ExecutionProvider.DML);
                     TheLogger($"[{_prefix}][INIT][DmlExecutionProvider]");
                     break;
                 }
                 case "ROCMExecutionProvider":
                 {
-                    OrtROCMProviderOptions provider = new();
-                    var providerOptionsDict = new Dictionary<string, string>
-                    {
-                        ["device_id"] = "0",
-                        ["cudnn_conv_use_max_workspace"] = "1"
-                    };
-                    provider.UpdateOptions(providerOptionsDict);
-                    _sessionOptions.AppendExecutionProvider_ROCm(provider);
+                    SetExcutionProvider(ExecutionProvider.ROCm);
                     TheLogger($"[{_prefix}][INIT][ROCMExecutionProvider]");
 
                     break;
@@ -350,10 +354,28 @@ public class Yolov7NetService
 
             lettered.Item1 = Operators.Operators.Div(lettered.Item1, 255f);
 
+            // var revert = Operators.Operators.Mul(lettered.Item1.Clone(), 255f);
+            //
+            // Image<Rgb24> draw = new Image<Rgb24>(Configuration.Default, 640, 640);
+            // draw.ProcessPixelRows(accessor =>
+            // {
+            //     for (var y = 0; y < revert.Dimensions[1]; y++)
+            //     {
+            //         var pixelSpan = accessor.GetRowSpan(y);
+            //         for (var x = 0; x < revert.Dimensions[2]; x++)
+            //         {
+            //             pixelSpan[x].R = (byte)revert[0, y, x];
+            //             pixelSpan[x].G = (byte)revert[1, y, x];
+            //             pixelSpan[x].B = (byte)revert[2, y, x];
+            //         }
+            //     }
+            // });
+            // await draw.SaveAsync("D:/Documents/Dotnet/BlazorApp1/debugImage.jpg");
+
             var letteredItem1Dim = lettered.Item1.Dimensions.ToArray();
             long[] newDim = new[] { 1L, letteredItem1Dim[0], letteredItem1Dim[1], letteredItem1Dim[2] };
 
-            using var inputOrtValue = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, PreProcess.ExpandDim(lettered.Item1).Buffer, newDim);
+            using var inputOrtValue = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, Operators.Operators.ExpandDim(lettered.Item1).Buffer, newDim);
             var inputs = new Dictionary<string, OrtValue> { { _inputNames.First(), inputOrtValue } };
 
             using var fromResult = await Task.FromResult(_session.Run(_runOptions, inputs, _outputNames));
@@ -371,6 +393,129 @@ public class Yolov7NetService
         public List<string> GetAvailableProviders()
         {
             return OrtEnv.Instance().GetAvailableProviders().ToList();
+        }
+
+        public void SetExcutionProvider(ExecutionProvider ex)
+        {
+            switch (ex)
+            {
+                case ExecutionProvider.CPU:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    break;
+                }
+                case ExecutionProvider.CUDA:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    OrtCUDAProviderOptions providerOptions = new OrtCUDAProviderOptions();
+                    var providerOptionsDict = new Dictionary<string, string>
+                    {
+                        ["cudnn_conv_use_max_workspace"] = "1",
+                        ["device_id"] = "0"
+                    };
+                    providerOptions.UpdateOptions(providerOptionsDict);
+                    _sessionOptions.AppendExecutionProvider_CUDA(providerOptions);
+                    break;
+                }
+                case ExecutionProvider.TensorRT:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    OrtTensorRTProviderOptions provider = new OrtTensorRTProviderOptions();
+                    var providerOptionsDict = new Dictionary<string, string>
+                    {
+                        ["cudnn_conv_use_max_workspace"] = "1",
+                        ["device_id"] = "0",
+                        ["ORT_TENSORRT_FP16_ENABLE"] = "true",
+                        ["ORT_TENSORRT_LAYER_NORM_FP32_FALLBACK"] = "true",
+                        ["ORT_TENSORRT_ENGINE_CACHE_ENABLE"] = "true",
+                    };
+                    provider.UpdateOptions(providerOptionsDict);
+                    _sessionOptions.AppendExecutionProvider_Tensorrt(provider);
+                    break;
+                }
+                case ExecutionProvider.Azure:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    break;
+                }
+                case ExecutionProvider.CoreML:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    break;
+                }
+                case ExecutionProvider.DML:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    _sessionOptions.EnableMemoryPattern = false;
+                    _sessionOptions.AppendExecutionProvider_DML(0);
+                    break;
+                }
+                case ExecutionProvider.NNAPI:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    break;
+                }
+                case ExecutionProvider.OpenCL:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    break;
+                }
+                case ExecutionProvider.QNN:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    break;
+                }
+                case ExecutionProvider.XNNPACK:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    break;
+                }
+                case ExecutionProvider.OpenVINO:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    _sessionOptions.AppendExecutionProvider_OpenVINO();
+                    _sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_DISABLE_ALL;
+                    break;
+                }
+                case ExecutionProvider.oneDNN:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    break;
+                }
+                case ExecutionProvider.DNNL:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    _sessionOptions.AppendExecutionProvider_Dnnl();
+                    break;
+                }
+                case ExecutionProvider.ROCm:
+                {
+                    _sessionOptions = CopyOptions(_sessionOptions);
+                    OrtROCMProviderOptions provider = new();
+                    var providerOptionsDict = new Dictionary<string, string>
+                    {
+                        ["device_id"] = "0",
+                        ["cudnn_conv_use_max_workspace"] = "1"
+                    };
+                    provider.UpdateOptions(providerOptionsDict);
+                    _sessionOptions.AppendExecutionProvider_ROCm(provider);
+                    break;
+                }
+            }
+
+            return;
+
+            SessionOptions CopyOptions(SessionOptions sessionOption)
+            {
+                SessionOptions sessionOptions = new SessionOptions();
+                sessionOptions.EnableCpuMemArena = sessionOption.EnableCpuMemArena;
+                sessionOptions.EnableMemoryPattern = sessionOption.EnableMemoryPattern;
+                sessionOptions.EnableProfiling = sessionOption.EnableProfiling;
+                sessionOptions.ExecutionMode = sessionOption.ExecutionMode;
+                sessionOptions.GraphOptimizationLevel = sessionOption.GraphOptimizationLevel;
+
+                return sessionOptions;
+            }
         }
 
         /// <summary>

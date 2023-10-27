@@ -30,7 +30,7 @@ public class PostProcess
     /// <summary>
     /// 
     /// </summary>
-    /// <param name="modelPreds">Tensor with shape (batch, 7)</param>
+    /// <param name="modelPreds">Tensor with shape (batch x 7)</param>
     /// <param name="imageShape">the original shape of image x</param>
     /// <param name="dwdhs"></param>
     /// <param name="ratios"></param>
