@@ -581,12 +581,12 @@ public abstract class Yolov7NetService
         {
             if (_jsRuntime is not null)
             {
-               _jsRuntime.InvokeVoidAsync("console.log", message).AsTask();
+               _jsRuntime.InvokeVoidAsync("console.log", message);
             }
 
             if (_logger is not null)
             {
-                _logger.LogInformation(message);
+                _logger.LogInformation("Log {log}", message);
             }
         }
     }
