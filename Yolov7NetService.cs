@@ -354,6 +354,7 @@ public abstract class Yolov7NetService
                 {
                     _sessionOptions = DefaultOptions();
                     _sessionOptions.EnableMemoryPattern = false;
+                    _sessionOptions.ExecutionMode = ExecutionMode.ORT_SEQUENTIAL;
                     _sessionOptions.AppendExecutionProvider_DML(0);
                     TheLogger($"[{_prefix}][INIT][ExecutionProvider][Dml]");
                     break;
@@ -418,7 +419,6 @@ public abstract class Yolov7NetService
             
             var prepackedWeightsContainer = new PrePackedWeightsContainer();
             _runOptions = new RunOptions();
-
             if (weight is not null)
             {
                 switch (weight)
@@ -453,7 +453,6 @@ public abstract class Yolov7NetService
                 _session = new InferenceSession(Properties.Resources.yolov7_tiny, _sessionOptions, prepackedWeightsContainer);
                 TheLogger($"[{_prefix}][INIT][ModelWeights][yolov7_tiny]");
             }
-
             var metadata = _session?.ModelMetadata;
             var customMetadata = metadata?.CustomMetadataMap;
             Debug.Assert(customMetadata != null, nameof(customMetadata) + " != null");
