@@ -27,12 +27,12 @@ public abstract class PreProcess
         // fill feed with special color
         Parallel.For(0, newShape[1], x =>
         {
-            for (int y = 0; y < newShape[2]; y++)
+            Parallel.For(0, newShape[2], y =>
             {
                 feed[0, x, y] = colors[0];
                 feed[1, x, y] = colors[1];
                 feed[2, x, y] = colors[2];
-            }
+            });
         });
 
 
@@ -62,7 +62,7 @@ public abstract class PreProcess
 
         if (oriShape != newUnPad)
         {
-            image = resize_linear(image, newUnPad);
+            image = ResizeLinear(image, newUnPad);
         }
 
         int left = (int)(Math.Round(dhdw[1] - 0.1));
@@ -71,29 +71,14 @@ public abstract class PreProcess
         // implement of opencv copyMakeBorder
         Parallel.For(0, image.Dimensions[1], x =>
         {
-            for (int y = 0; y < image.Dimensions[2]; y++)
+            Parallel.For(0, image.Dimensions[2], y =>
             {
                 feed[0, x + top, y + left] = image[0, x, y];
                 feed[1, x + top, y + left] = image[1, x, y];
                 feed[2, x + top, y + left] = image[2, x, y];
-            }
+            });
         });
-        // var rever = Operators.Operators.VerticalFlip(feed);
-        // Image<Rgb24> draw = new Image<Rgb24>(Configuration.Default, 640, 640);
-        // draw.ProcessPixelRows(accessor =>
-        // {
-        //     for (var y = 0; y < feed.Dimensions[1]; y++)
-        //     {
-        //         var pixelSpan = accessor.GetRowSpan(y);
-        //         for (var x = 0; x < feed.Dimensions[2]; x++)
-        //         {
-        //             pixelSpan[x].R = (byte)rever[0, y, x];
-        //             pixelSpan[x].G = (byte)rever[1, y, x];
-        //             pixelSpan[x].B = (byte)rever[2, y, x];
-        //         }
-        //     }
-        // });
-        // draw.Save("D:/Documents/Dotnet/BlazorApp1/debugImage.jpg");
+        
         return (feed, ratio, dhdw);
     }
 
@@ -101,49 +86,21 @@ public abstract class PreProcess
     /// Convert ImageSharp to float32 DenseTensor
     /// </summary>
     /// <param name="image">ImageSharp</param>
-    /// <param name="maxShape"></param>
     /// <returns>DenseTensor with shape 3, Height, Width</returns>
-    public static DenseTensor<float> Image2DenseTensor(Image<Rgb24> image, int? maxShape = null)
+    public static DenseTensor<float> Image2DenseTensor(Image<Rgb24> image)
     {
         int[] shape = new[] { 3, image.Height, image.Width };
-        if (maxShape is not null)
-        {
-            int maxDim = Math.Max(image.Height, image.Width);
-            maxDim = Math.Max(maxDim, (int)maxShape);
-
-            if (maxDim > maxShape)
-            {
-                float vectorMaxDim = (float)maxDim;
-                float vectorMaxShape = (float)maxShape;
-                var ratio = vectorMaxShape / vectorMaxDim;
-                float width = image.Width;
-                float height = image.Height;
-                image.Mutate(context =>
-                {
-                    context.Resize(new ResizeOptions
-                    {
-                        Size = new Size((int)(width * ratio), (int)(height * ratio)),
-                        Mode = ResizeMode.Crop
-                    });
-                });
-            }
-        }
-
 
         DenseTensor<float> feed = new DenseTensor<float>(shape);
 
-        image.ProcessPixelRows(accessor =>
+        Parallel.For(0, shape[1], y =>
         {
-            for (var y = 0; y < accessor.Height; y++)
+            Parallel.For(0, shape[2], x =>
             {
-                var pixelSpan = accessor.GetRowSpan(y);
-                for (var x = 0; x < accessor.Width; x++)
-                {
-                    feed[0, y, x] = pixelSpan[x].R;
-                    feed[1, y, x] = pixelSpan[x].G;
-                    feed[2, y, x] = pixelSpan[x].B;
-                }
-            }
+                feed[0, y, x] = image[x, y].R;
+                feed[1, y, x] = image[x, y].G;
+                feed[2, y, x] = image[x, y].B;
+            });
         });
 
         return feed;
@@ -153,10 +110,10 @@ public abstract class PreProcess
     /// <summary>
     /// https://stackoverflow.com/a/69157357/22634632 image resize with numpy
     /// </summary>
-    /// <param name="image"></param>
+    /// <param name="imageMatrix"></param>
     /// <param name="shape"></param>
     /// <returns></returns>
-    public static DenseTensor<float> resize_linear(DenseTensor<float> imageMatrix, int[] shape)
+    public static DenseTensor<float> ResizeLinear(DenseTensor<float> imageMatrix, int[] shape)
     {
         int[] newShape = new[] { 3, shape[0], shape[1] };
         DenseTensor<float> outputImage = new DenseTensor<float>(newShape);
@@ -171,7 +128,7 @@ public abstract class PreProcess
 
         Parallel.For(0, shape[0], y =>
         {
-            for (int x = 0; x < shape[1]; x++)
+            Parallel.For(0, shape[1], x =>
             {
                 var oldX = x * invScaleFactorX;
                 var oldY = y * invScaleFactorY;
@@ -210,10 +167,8 @@ public abstract class PreProcess
                 outputImage[0, y, x] = finalBlendR;
                 outputImage[1, y, x] = finalBlendG;
                 outputImage[2, y, x] = finalBlendB;
-            }
+            });
         });
         return outputImage;
     }
-
-   
 }

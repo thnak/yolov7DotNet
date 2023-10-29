@@ -6,13 +6,15 @@ using Microsoft.JSInterop;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using yolov7DotNet.Helper;
+using yolov7DotNet.ModelsHelper;
+using yolov7DotNet.Operators;
 
 namespace yolov7DotNet;
 
 /// <summary>
 /// 
 /// </summary>
-public class Yolov7NetService
+public abstract class Yolov7NetService
 {
     /// <summary>
     /// model weight include in this project
@@ -65,15 +67,15 @@ public class Yolov7NetService
         DNNL
     }
 
-    private interface IYolov7
+    public interface IYolov7
     {
-        Task<List<Models.Models.Yolov7Predict>> InferenceAsync(MemoryStream memoryStream);
-        Task<List<Models.Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image);
-        Task<List<Models.Models.Yolov7Predict>> InferenceAsync(string fileDir);
-        Task<List<Models.Models.Yolov7Predict>> InferenceAsync(Stream stream);
-        Task<List<Models.Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor);
+        Task<List<Models.Yolov7Predict>> InferenceAsync(MemoryStream memoryStream);
+        Task<List<Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image);
+        Task<List<Models.Yolov7Predict>> InferenceAsync(string fileDir);
+        Task<List<Models.Yolov7Predict>> InferenceAsync(Stream stream);
+        Task<List<Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor);
         List<string> GetAvailableProviders();
-        void SetExcutionProvider(ExecutionProvider ex);
+        void SetExcutionProvider(ExecutionProvider ex,  ModelWeights? weight, byte[]? byteWeight);
         Task<float> WarmUp(int cycle, int[] shape);
     }
 
@@ -84,37 +86,38 @@ public class Yolov7NetService
     {
         private readonly string _prefix = Properties.Resources.prefix;
         private SessionOptions _sessionOptions;
-        private readonly InferenceSession _session;
-        private readonly RunOptions _runOptions;
-        private readonly List<string> _categories;
-        private readonly IEnumerable<string> _inputNames;
-        private readonly IReadOnlyList<string> _outputNames;
+        private  InferenceSession _session;
+        private  RunOptions _runOptions;
+        private  List<string> _categories;
+        private  IEnumerable<string> _inputNames;
+        private  IReadOnlyList<string> _outputNames;
         private int Stride { get; set; }
         private bool _disposed;
-        private IMemoryCache MemoryCache { get; }
+        private IMemoryCache MemoryCache { get; set; }
 
-        private readonly int[] _inputShape;
+        private int[] _inputShape;
         private readonly IJSRuntime? _jsRuntime;
         private readonly ILogger<Yolov7>? _logger;
-
-        public Yolov7() : this(weight: ModelWeights.Yolov7Tiny, jsRuntime: null, byteWeight: null)
+        
+        public Yolov7() : this(weight: ModelWeights.Yolov7Tiny, jsRuntime: null, byteWeight: null, logger:null)
         {
         }
 
-        public Yolov7(ModelWeights modelWeights) : this(weight: modelWeights, jsRuntime: null, byteWeight: null)
+        public Yolov7(ModelWeights modelWeights) : this(weight: modelWeights, jsRuntime: null, byteWeight: null, logger:null)
         {
         }
-
-        public Yolov7(ModelWeights modelWeights, IJSRuntime jsRuntime) : this(weight: modelWeights, jsRuntime: jsRuntime, byteWeight: null)
+        public Yolov7(IJSRuntime jsRuntime) : this(weight: ModelWeights.Yolov7Tiny, jsRuntime: jsRuntime, byteWeight: null, logger: null)
+        {
+        }
+        public Yolov7(ModelWeights modelWeights, IJSRuntime jsRuntime) : this(weight: modelWeights, jsRuntime: jsRuntime, byteWeight: null, logger: null)
         {
         }
 
         public Yolov7(ModelWeights modelWeights, ILogger<Yolov7> logger) : this(weight: modelWeights, jsRuntime: null, byteWeight: null, logger: logger)
         {
         }
-
-        //
-        public Yolov7(byte[] modelWeights) : this(byteWeight: modelWeights, jsRuntime: null, logger: null)
+        
+        public Yolov7(byte[] modelWeights) : this(byteWeight: modelWeights, jsRuntime: null, logger: null, weight: null)
         {
         }
 
@@ -122,11 +125,10 @@ public class Yolov7NetService
         {
         }
 
-        public Yolov7(byte[] modelWeights, ILogger<Yolov7> logger) : this(byteWeight: modelWeights, jsRuntime: null, logger: logger)
+        public Yolov7(byte[] modelWeights, ILogger<Yolov7> logger) : this(byteWeight: modelWeights, jsRuntime: null, logger: logger, weight:null)
         {
         }
-
-        //
+        
         public Yolov7(IJSRuntime? jsRuntime = null, ModelWeights? weight = null, byte[]? byteWeight = null) : this(jsRuntime: jsRuntime, logger: null, weight: weight, byteWeight: byteWeight)
         {
         }
@@ -143,50 +145,277 @@ public class Yolov7NetService
             {
                 _logger = logger;
             }
-
-            _sessionOptions = new SessionOptions();
-            _sessionOptions.EnableMemoryPattern = true;
-            _sessionOptions.EnableCpuMemArena = true;
-            _sessionOptions.EnableProfiling = false;
-            _sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
-            _sessionOptions.ExecutionMode = ExecutionMode.ORT_PARALLEL;
+            
             var availableProvider = OrtEnv.Instance().GetAvailableProviders()[0];
 
             switch (availableProvider)
             {
                 case "CUDAExecutionProvider":
                 {
-                    SetExcutionProvider(ExecutionProvider.CUDA);
+                    SetExcutionProvider(ExecutionProvider.CUDA, weight, byteWeight);
                     break;
                 }
                 case "TensorrtExecutionProvider":
                 {
-                    SetExcutionProvider(ExecutionProvider.TensorRT);
+                    SetExcutionProvider(ExecutionProvider.TensorRT, weight, byteWeight);
                     break;
                 }
                 case "DNNLExecutionProvider":
                 {
-                    SetExcutionProvider(ExecutionProvider.DNNL);
+                    SetExcutionProvider(ExecutionProvider.DNNL, weight, byteWeight);
                     break;
                 }
                 case "OpenVINOExecutionProvider":
                 {
-                    SetExcutionProvider(ExecutionProvider.OpenVINO);
+                    SetExcutionProvider(ExecutionProvider.OpenVINO, weight, byteWeight);
 
                     break;
                 }
                 case "DmlExecutionProvider":
                 {
-                    SetExcutionProvider(ExecutionProvider.DML);
+                    SetExcutionProvider(ExecutionProvider.DML, weight, byteWeight);
                     break;
                 }
                 case "ROCMExecutionProvider":
                 {
-                    SetExcutionProvider(ExecutionProvider.ROCm);
+                    SetExcutionProvider(ExecutionProvider.ROCm, weight, byteWeight);
+                    break;
+                }
+                default:
+                {
+                    SetExcutionProvider(ExecutionProvider.CPU, weight, byteWeight);
                     break;
                 }
             }
+        }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="byteArray"></param>
+        /// <returns></returns>
+        public async Task<List<Models.Yolov7Predict>> InferenceAsync(byte[] byteArray)
+        {
+            using var image = Image.Load<Rgb24>(byteArray);
+            return await InferenceAsync(image);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="memoryStream"></param>
+        /// <returns></returns>
+        public async Task<List<Models.Yolov7Predict>> InferenceAsync(MemoryStream memoryStream)
+        {
+            using var image = Image.Load<Rgb24>(memoryStream);
+            return await InferenceAsync(image);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="fileDir"></param>
+        /// <returns></returns>
+        public async Task<List<Models.Yolov7Predict>> InferenceAsync(string fileDir)
+        {
+            using var image = Image.Load<Rgb24>(fileDir);
+            return await InferenceAsync(image);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="stream"></param>
+        /// <returns></returns>
+        public async Task<List<Models.Yolov7Predict>> InferenceAsync(Stream stream)
+        {
+            using var image = Image.Load<Rgb24>(stream);
+            return await InferenceAsync(image);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="image"></param>
+        /// <returns></returns>
+        public async Task<List<Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image)
+        {
+            var tensorFeed = PreProcess.Image2DenseTensor(image);
+            return await InferenceAsync(tensorFeed);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="tensor"></param>
+        /// <returns></returns>
+        public async Task<List<Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor)
+        {
+            var imageShape = tensor.Dimensions[1..].ToArray();
+            var lettered = PreProcess.LetterBox(tensor, false, false, true, Stride, new[] { _inputShape[2], _inputShape[3] });
+            
+            var feedTensor = Ops.ExpandDim(Ops.Div(lettered.Item1, 255f));
+
+            return await RunNet(feedTensor, new List<float[]>() { lettered.Item3 }, new List<float[]>() { lettered.Item2 }, new List<int[]>() { imageShape });
+        }
+
+        /// <summary>
+        /// start inference and return the predictions, support dynamic batch
+        /// </summary>
+        /// <param name="tensor">4 dimension only</param>
+        /// <param name="dhdws"></param>
+        /// <param name="ratios"></param>
+        /// <param name="imageShapes"></param>
+        /// <returns></returns>
+        private async Task<List<Models.Yolov7Predict>> RunNet(DenseTensor<float> tensor, List<float[]> dhdws, List<float[]> ratios, List<int[]> imageShapes)
+        {
+            long[] newDim = new[] { (long)tensor.Dimensions[0], tensor.Dimensions[1], tensor.Dimensions[2], tensor.Dimensions[3] };
+            var inputOrtValue = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, tensor.Buffer, newDim);
+            var inputs = new Dictionary<string, OrtValue> { { _inputNames.First(), inputOrtValue } };
+
+            var fromResult = await Task.FromResult(_session.Run(_runOptions, inputs, _outputNames));
+
+            float[] resultArrays = fromResult[0].Value.GetTensorDataAsSpan<float>().ToArray();
+            inputOrtValue.Dispose();
+            fromResult.Dispose();
+            Models.Predictions predictions = new Models.Predictions(resultArrays, _categories.ToArray(), dhdws, ratios, imageShapes);
+            return predictions.GetDetect();
+        }
+
+        /// <summary>
+        /// GetAvailableProviders
+        /// </summary>
+        /// <returns></returns>
+        public List<string> GetAvailableProviders()
+        {
+            return OrtEnv.Instance().GetAvailableProviders().ToList();
+        }
+
+        /// <summary>
+        /// set 
+        /// </summary>
+        /// <param name="ex"></param>
+        /// <param name="weight"></param>
+        /// <param name="byteWeight"></param>
+        /// <exception cref="Exception"></exception>
+        public void SetExcutionProvider(ExecutionProvider ex, ModelWeights? weight, byte[]? byteWeight)
+        {
+            switch (ex)
+            {
+                case ExecutionProvider.CPU:
+                {
+                    _sessionOptions = DefaultOptions();
+                    TheLogger($"[{_prefix}][INIT][ExecutionProvider][CPU]");
+                    break;
+                }
+                case ExecutionProvider.CUDA:
+                {
+                    _sessionOptions = DefaultOptions();
+                    OrtCUDAProviderOptions providerOptions = new OrtCUDAProviderOptions();
+                    var providerOptionsDict = new Dictionary<string, string>
+                    {
+                        ["cudnn_conv_use_max_workspace"] = "1",
+                        ["device_id"] = "0"
+                    };
+                    providerOptions.UpdateOptions(providerOptionsDict);
+                    _sessionOptions.AppendExecutionProvider_CUDA(providerOptions);
+                    TheLogger($"[{_prefix}][INIT][ExecutionProvider][CUDA]");
+                    break;
+                }
+                case ExecutionProvider.TensorRT:
+                {
+                    _sessionOptions = DefaultOptions();
+                    OrtTensorRTProviderOptions provider = new OrtTensorRTProviderOptions();
+                    var providerOptionsDict = new Dictionary<string, string>
+                    {
+                        ["cudnn_conv_use_max_workspace"] = "1",
+                        ["device_id"] = "0",
+                        ["ORT_TENSORRT_FP16_ENABLE"] = "true",
+                        ["ORT_TENSORRT_LAYER_NORM_FP32_FALLBACK"] = "true",
+                        ["ORT_TENSORRT_ENGINE_CACHE_ENABLE"] = "true",
+                    };
+                    provider.UpdateOptions(providerOptionsDict);
+                    _sessionOptions.AppendExecutionProvider_Tensorrt(provider);
+                    TheLogger($"[{_prefix}][INIT][ExecutionProvider][Tensorrt]");
+
+                    break;
+                }
+                case ExecutionProvider.Azure:
+                {
+                    _sessionOptions = DefaultOptions();
+                    break;
+                }
+                case ExecutionProvider.CoreML:
+                {
+                    _sessionOptions = DefaultOptions();
+                    break;
+                }
+                case ExecutionProvider.DML:
+                {
+                    _sessionOptions = DefaultOptions();
+                    _sessionOptions.EnableMemoryPattern = false;
+                    _sessionOptions.AppendExecutionProvider_DML(0);
+                    TheLogger($"[{_prefix}][INIT][ExecutionProvider][Dml]");
+                    break;
+                }
+                case ExecutionProvider.NNAPI:
+                {
+                    _sessionOptions = DefaultOptions();
+                    break;
+                }
+                case ExecutionProvider.OpenCL:
+                {
+                    _sessionOptions = DefaultOptions();
+                    break;
+                }
+                case ExecutionProvider.QNN:
+                {
+                    _sessionOptions = DefaultOptions();
+                    break;
+                }
+                case ExecutionProvider.XNNPACK:
+                {
+                    _sessionOptions = DefaultOptions();
+                    break;
+                }
+                case ExecutionProvider.OpenVINO:
+                {
+                    _sessionOptions = DefaultOptions();
+                    _sessionOptions.AppendExecutionProvider_OpenVINO();
+                    _sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_DISABLE_ALL;
+                    TheLogger($"[{_prefix}][INIT][ExecutionProvider][OpenVINO]");
+
+                    break;
+                }
+                case ExecutionProvider.oneDNN:
+                {
+                    _sessionOptions = DefaultOptions();
+                    break;
+                }
+                case ExecutionProvider.DNNL:
+                {
+                    _sessionOptions = DefaultOptions();
+                    _sessionOptions.AppendExecutionProvider_Dnnl();
+                    TheLogger($"[{_prefix}][INIT][ExecutionProvider][DNNL]");
+
+                    break;
+                }
+                case ExecutionProvider.ROCm:
+                {
+                    _sessionOptions = DefaultOptions();
+                    OrtROCMProviderOptions provider = new();
+                    var providerOptionsDict = new Dictionary<string, string>
+                    {
+                        ["device_id"] = "0",
+                        ["cudnn_conv_use_max_workspace"] = "1"
+                    };
+                    provider.UpdateOptions(providerOptionsDict);
+                    _sessionOptions.AppendExecutionProvider_ROCm(provider);
+                    TheLogger($"[{_prefix}][INIT][ExecutionProvider][ROCM]");
+                    break;
+                }
+            }
+            
             var prepackedWeightsContainer = new PrePackedWeightsContainer();
             _runOptions = new RunOptions();
 
@@ -276,269 +505,32 @@ public class Yolov7NetService
             }
             else
             {
-                throw new Exception($"[{_prefix}][Init][ERROR] could not init");
+                var exception = new Exception(message: $"[{_prefix}][Init][ERROR] could not init");
+                TheLogger($"[{_prefix}][Init][ERROR] could not init");
+                exception.HelpLink = "https://github.com/thnak/yolov7DotNet";
+                exception.HResult = 0;
+                exception.Source = "https://github.com/thnak/yolov7DotNet";
+                throw exception;
             }
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="byteArray"></param>
-        /// <returns></returns>
-        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(byte[] byteArray)
-        {
-            using var image = Image.Load<Rgb24>(byteArray);
-            return await InferenceAsync(image);
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="memoryStream"></param>
-        /// <returns></returns>
-        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(MemoryStream memoryStream)
-        {
-            using var image = Image.Load<Rgb24>(memoryStream);
-            return await InferenceAsync(image);
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="fileDir"></param>
-        /// <returns></returns>
-        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(string fileDir)
-        {
-            using var image = Image.Load<Rgb24>(fileDir);
-            return await InferenceAsync(image);
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="stream"></param>
-        /// <returns></returns>
-        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(Stream stream)
-        {
-            using var image = Image.Load<Rgb24>(stream);
-            return await InferenceAsync(image);
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="image"></param>
-        /// <returns></returns>
-        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image)
-        {
-            var tensorFeed = PreProcess.Image2DenseTensor(image);
-            return await InferenceAsync(tensorFeed);
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="tensor"></param>
-        /// <returns></returns>
-        public async Task<List<Models.Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor)
-        {
-            var imageShape = tensor.Dimensions[1..].ToArray();
-            var lettered = PreProcess.LetterBox(tensor, false, false, true, Stride, new[] { _inputShape[2], _inputShape[3] });
-
-            lettered.Item1 = Operators.Operators.Div(lettered.Item1, 255f);
-
-            // var revert = Operators.Operators.Mul(lettered.Item1.Clone(), 255f);
-            //
-            // Image<Rgb24> draw = new Image<Rgb24>(Configuration.Default, 640, 640);
-            // draw.ProcessPixelRows(accessor =>
-            // {
-            //     for (var y = 0; y < revert.Dimensions[1]; y++)
-            //     {
-            //         var pixelSpan = accessor.GetRowSpan(y);
-            //         for (var x = 0; x < revert.Dimensions[2]; x++)
-            //         {
-            //             pixelSpan[x].R = (byte)revert[0, y, x];
-            //             pixelSpan[x].G = (byte)revert[1, y, x];
-            //             pixelSpan[x].B = (byte)revert[2, y, x];
-            //         }
-            //     }
-            // });
-            // await draw.SaveAsync("D:/Documents/Dotnet/BlazorApp1/debugImage.jpg");
-
-            var letteredItem1Dim = lettered.Item1.Dimensions.ToArray();
-            long[] newDim = new[] { 1L, letteredItem1Dim[0], letteredItem1Dim[1], letteredItem1Dim[2] };
-
-            var feedTensor = Operators.Operators.ExpandDim(lettered.Item1);
-
-            return await RunNet(feedTensor, new List<float[]>() { lettered.Item3 }, new List<float[]>() { lettered.Item2 }, new List<int[]>() { imageShape });
-        }
-
-        /// <summary>
-        /// start inference and return the predictions
-        /// </summary>
-        /// <param name="tensor">4 dimension only</param>
-        /// <param name="dhdws"></param>
-        /// <param name="ratios"></param>
-        /// <param name="imageShapes"></param>
-        /// <returns></returns>
-        private async Task<List<Models.Models.Yolov7Predict>> RunNet(DenseTensor<float> tensor, List<float[]> dhdws, List<float[]> ratios, List<int[]> imageShapes)
-        {
-            long[] newDim = new[] { (long)tensor.Dimensions[0], tensor.Dimensions[1], tensor.Dimensions[2], tensor.Dimensions[3] };
-            var inputOrtValue = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, tensor.Buffer, newDim);
-            var inputs = new Dictionary<string, OrtValue> { { _inputNames.First(), inputOrtValue } };
-
-            var fromResult = await Task.FromResult(_session.Run(_runOptions, inputs, _outputNames));
-
-            float[] resultArrays = fromResult.First().Value.GetTensorDataAsSpan<float>().ToArray();
-            inputOrtValue.Dispose();
-            fromResult.Dispose();
-            Models.Models.Predictions predictions = new Models.Models.Predictions(resultArrays, _categories.ToArray(), dhdws, ratios, imageShapes);
-            return predictions.GetDetect();
-        }
-
-        /// <summary>
-        /// GetAvailableProviders
-        /// </summary>
-        /// <returns></returns>
-        public List<string> GetAvailableProviders()
-        {
-            return OrtEnv.Instance().GetAvailableProviders().ToList();
-        }
-
-        public void SetExcutionProvider(ExecutionProvider ex)
-        {
-            switch (ex)
+            
+            SessionOptions DefaultOptions()
             {
-                case ExecutionProvider.CPU:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    TheLogger($"[{_prefix}][INIT][CPUExecutionProvider]");
-                    break;
-                }
-                case ExecutionProvider.CUDA:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    OrtCUDAProviderOptions providerOptions = new OrtCUDAProviderOptions();
-                    var providerOptionsDict = new Dictionary<string, string>
-                    {
-                        ["cudnn_conv_use_max_workspace"] = "1",
-                        ["device_id"] = "0"
-                    };
-                    providerOptions.UpdateOptions(providerOptionsDict);
-                    _sessionOptions.AppendExecutionProvider_CUDA(providerOptions);
-                    TheLogger($"[{_prefix}][INIT][CUDAExecutionProvider]");
-                    break;
-                }
-                case ExecutionProvider.TensorRT:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    OrtTensorRTProviderOptions provider = new OrtTensorRTProviderOptions();
-                    var providerOptionsDict = new Dictionary<string, string>
-                    {
-                        ["cudnn_conv_use_max_workspace"] = "1",
-                        ["device_id"] = "0",
-                        ["ORT_TENSORRT_FP16_ENABLE"] = "true",
-                        ["ORT_TENSORRT_LAYER_NORM_FP32_FALLBACK"] = "true",
-                        ["ORT_TENSORRT_ENGINE_CACHE_ENABLE"] = "true",
-                    };
-                    provider.UpdateOptions(providerOptionsDict);
-                    _sessionOptions.AppendExecutionProvider_Tensorrt(provider);
-                    TheLogger($"[{_prefix}][INIT][TensorrtExecutionProvider]");
-
-                    break;
-                }
-                case ExecutionProvider.Azure:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    break;
-                }
-                case ExecutionProvider.CoreML:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    break;
-                }
-                case ExecutionProvider.DML:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    _sessionOptions.EnableMemoryPattern = false;
-                    _sessionOptions.AppendExecutionProvider_DML(0);
-                    TheLogger($"[{_prefix}][INIT][DmlExecutionProvider]");
-
-                    break;
-                }
-                case ExecutionProvider.NNAPI:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    break;
-                }
-                case ExecutionProvider.OpenCL:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    break;
-                }
-                case ExecutionProvider.QNN:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    break;
-                }
-                case ExecutionProvider.XNNPACK:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    break;
-                }
-                case ExecutionProvider.OpenVINO:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    _sessionOptions.AppendExecutionProvider_OpenVINO();
-                    _sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_DISABLE_ALL;
-                    TheLogger($"[{_prefix}][INIT][OpenVINOExecutionProvider]");
-
-                    break;
-                }
-                case ExecutionProvider.oneDNN:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    break;
-                }
-                case ExecutionProvider.DNNL:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    _sessionOptions.AppendExecutionProvider_Dnnl();
-                    TheLogger($"[{_prefix}][INIT][DNNLExecutionProvider]");
-
-                    break;
-                }
-                case ExecutionProvider.ROCm:
-                {
-                    _sessionOptions = CopyOptions(_sessionOptions);
-                    OrtROCMProviderOptions provider = new();
-                    var providerOptionsDict = new Dictionary<string, string>
-                    {
-                        ["device_id"] = "0",
-                        ["cudnn_conv_use_max_workspace"] = "1"
-                    };
-                    provider.UpdateOptions(providerOptionsDict);
-                    _sessionOptions.AppendExecutionProvider_ROCm(provider);
-                    TheLogger($"[{_prefix}][INIT][ROCMExecutionProvider]");
-                    break;
-                }
-            }
-
-            return;
-
-            SessionOptions CopyOptions(SessionOptions sessionOption)
-            {
-                SessionOptions sessionOptions = new SessionOptions();
-                sessionOptions.EnableCpuMemArena = sessionOption.EnableCpuMemArena;
-                sessionOptions.EnableMemoryPattern = sessionOption.EnableMemoryPattern;
-                sessionOptions.EnableProfiling = sessionOption.EnableProfiling;
-                sessionOptions.ExecutionMode = sessionOption.ExecutionMode;
-                sessionOptions.GraphOptimizationLevel = sessionOption.GraphOptimizationLevel;
-
+                var sessionOptions = new SessionOptions();
+                sessionOptions.EnableMemoryPattern = true;
+                sessionOptions.EnableCpuMemArena = true;
+                sessionOptions.EnableProfiling = false;
+                sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
+                sessionOptions.ExecutionMode = ExecutionMode.ORT_PARALLEL;
                 return sessionOptions;
             }
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="cycle">total number loop</param>
+        /// <param name="shape">tensor shape</param>
+        /// <returns></returns>
         public async Task<float> WarmUp(int cycle, int[] shape)
         {
             Stopwatch sw = Stopwatch.StartNew();
@@ -589,7 +581,7 @@ public class Yolov7NetService
         {
             if (_jsRuntime is not null)
             {
-                _jsRuntime.InvokeVoidAsync("console.log", message);
+               _jsRuntime.InvokeVoidAsync("console.log", message).AsTask();
             }
 
             if (_logger is not null)

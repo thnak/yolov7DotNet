@@ -1,8 +1,9 @@
-﻿using Microsoft.ML.OnnxRuntime.Tensors;
+﻿using System.Diagnostics;
+using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace yolov7DotNet.Operators;
 
-public class Operators
+public abstract class Ops
 {
     /// <summary>
     /// 
@@ -162,30 +163,17 @@ public class Operators
         int width = tensor.Dimensions[2];
         int[] shape = new[] { 1, 3, height, width };
 
-        DenseTensor<float> denseTensor = new DenseTensor<float>(shape);
-
-        if (height == width)
+        DenseTensor<float> denseTensor = new DenseTensor<float>(dimensions: shape);
+        Parallel.For(0, height, i =>
         {
-            Parallel.For(0, height, i =>
+            Parallel.For(0, width, x =>
             {
-                denseTensor[0, 0, i, i] = tensor[0, i, i];
-                denseTensor[0, 1, i, i] = tensor[1, i, i];
-                denseTensor[0, 2, i, i] = tensor[2, i, i];
+                denseTensor[0, 0, i, x] = tensor[0, i, x];
+                denseTensor[0, 1, i, x] = tensor[1, i, x];
+                denseTensor[0, 2, i, x] = tensor[2, i, x];
             });
-        }
-        else
-        {
-            Parallel.For(0, height, i =>
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    denseTensor[0, 0, i, x] = tensor[0, i, x];
-                    denseTensor[0, 1, i, x] = tensor[1, i, x];
-                    denseTensor[0, 2, i, x] = tensor[2, i, x];
-                }
-            });
-        }
-
+        });
+        
         return denseTensor;
     }
 
