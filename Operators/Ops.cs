@@ -1,4 +1,7 @@
 ﻿using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
+using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace yolov7DotNet.Operators;
@@ -140,15 +143,36 @@ public abstract class Ops
     public static DenseTensor<float> Add(DenseTensor<float> tensor1, DenseTensor<float> tensor2)
     {
         int[] dim = tensor1.Dimensions.ToArray();
-        Parallel.For(0, dim[1], x =>
+        int ndim = tensor1.Rank;
+        switch (ndim)
         {
-            for (int y = 0; y < dim[2]; y++)
+            case 2:
             {
-                tensor1[0, x, y] += tensor2[0, x, y];
-                tensor1[1, x, y] += tensor2[1, x, y];
-                tensor1[2, x, y] += tensor2[2, x, y];
+                for (int x = 0; x < dim[0]; x++)
+                {
+                    for (int y = 0; y < dim[1]; y++)
+                    {
+                        tensor1[x, y] += tensor2[x, y];
+                    }
+                }
+
+                break;
             }
-        });
+            case 3:
+            {
+                Parallel.For(0, dim[1], x =>
+                {
+                    for (int y = 0; y < dim[2]; y++)
+                    {
+                        tensor1[0, x, y] += tensor2[0, x, y];
+                        tensor1[1, x, y] += tensor2[1, x, y];
+                        tensor1[2, x, y] += tensor2[2, x, y];
+                    }
+                });
+                break;
+            }
+        }
+
         return tensor1;
     }
 
@@ -173,7 +197,7 @@ public abstract class Ops
                 denseTensor[0, 2, i, x] = tensor[2, i, x];
             });
         });
-        
+
         return denseTensor;
     }
 
@@ -258,7 +282,7 @@ public abstract class Ops
     }
 
     /// <summary>
-    /// 
+    /// concatenate 3D array into 4D array
     /// </summary>
     /// <param name="tensors"></param>
     /// <returns></returns>
@@ -282,5 +306,257 @@ public abstract class Ops
         });
 
         return value;
+    }
+
+    /// <summary>
+    /// convert float32 tensor to float16 tensor
+    /// </summary>
+    /// <param name="tensor"></param>
+    /// <returns></returns>
+    public static DenseTensor<Float16> ToHalfTensor(DenseTensor<float> tensor)
+    {
+        DenseTensor<Float16> halfTensor = new DenseTensor<Float16>(tensor.Dimensions);
+        var rank = tensor.Rank;
+        if (rank == 3)
+        {
+            Parallel.For(0, tensor.Dimensions[1], i =>
+            {
+                Parallel.For(0, tensor.Dimensions[2], x =>
+                {
+                    halfTensor[0, i, x] = (Float16)tensor[0, i, x];
+                    halfTensor[1, i, x] = (Float16)tensor[1, i, x];
+                    halfTensor[2, i, x] = (Float16)tensor[2, i, x];
+                });
+            });
+        }
+        else
+        {
+            Parallel.For(0, tensor.Dimensions[2], i =>
+            {
+                Parallel.For(0, tensor.Dimensions[3], x =>
+                {
+                    for (int y = 0; y < tensor.Dimensions[0]; y++)
+                    {
+                        halfTensor[y, 0, i, x] = (Float16)tensor[y, 0, i, x];
+                        halfTensor[y, 1, i, x] = (Float16)tensor[y, 1, i, x];
+                        halfTensor[y, 2, i, x] = (Float16)tensor[y, 2, i, x];
+                    }
+                });
+            });
+        }
+
+        return halfTensor;
+    }
+
+    public static DenseTensor<float> BitMap2Tensor(Bitmap bitmap)
+    {
+        int[] shape = new[] { 3, bitmap.Height, bitmap.Width };
+        DenseTensor<float> tensor = new DenseTensor<float>(shape);
+
+        Parallel.For(0, bitmap.Height, i =>
+        {
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                tensor[0, i, x] = bitmap.GetPixel(x, i).R;
+                tensor[1, i, x] = bitmap.GetPixel(x, i).G;
+                tensor[2, i, x] = bitmap.GetPixel(x, i).B;
+            }
+        });
+        Tensor<float> a = tensor;
+        var c = a[0, 1, 2];
+        return tensor;
+    }
+
+    /// <summary>
+    /// numpy implement of eye
+    /// </summary>
+    /// <param name="shape"></param>
+    /// <returns>ma trận đường chéo</returns>
+    public static DenseTensor<float> Eye(int[] shape)
+    {
+        DenseTensor<float> tensor = new DenseTensor<float>(shape);
+        tensor.Fill(0);
+        int ndim = shape.Length;
+        switch (ndim)
+        {
+            case 2:
+            {
+                int minShape = Math.Min(shape[0], shape[1]);
+
+                for (int x = 0; x < minShape; x++)
+                {
+                    tensor[x, x] = 1;
+                }
+
+                break;
+            }
+            case 3:
+            {
+                int minShape = Math.Min(shape[1], shape[2]);
+                Parallel.For(0, minShape, i =>
+                {
+                    for (int x = 0; x < shape[0]; x++)
+                    {
+                        tensor[x, i, i] = 1;
+                    }
+                });
+                break;
+            }
+        }
+
+
+        return tensor;
+    }
+
+    /// <summary>
+    /// implement of numpy.r_
+    /// </summary>
+    /// <param name="array1">[663.5, 221.5, 1.063, 127]</param>
+    /// <param name="array2">[0, 0, 0, 0]</param>
+    /// <returns>[663.5, 221.5, 1.063, 127, 0, 0, 0, 0]</returns>
+    public static DenseTensor<float> concatenateFlatten(DenseTensor<float> array1, DenseTensor<float> array2)
+    {
+        int length = (int)((int)array1.Length + array2.Length);
+        int[] shape = new[] { length };
+        DenseTensor<float> tensor = new DenseTensor<float>(shape);
+
+        int count = 0;
+
+        for (int i = 0; i < array1.Length; i++)
+        {
+            tensor[count] = array1[count];
+            count++;
+        }
+
+        for (int i = 0; i < array2.Length; i++)
+        {
+            tensor[count] = array1[count];
+            count++;
+        }
+
+        return tensor;
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="tensor"></param>
+    /// <returns></returns>
+    public static DenseTensor<float> Square(DenseTensor<float> tensor)
+    {
+        int ndim = tensor.Rank;
+        switch (ndim)
+        {
+            case 1:
+            {
+                for (var x = 0; x < tensor.Length; x++)
+                {
+                    tensor[x] *= tensor[x];
+                }
+
+                break;
+            }
+            case 2:
+            {
+                Parallel.For(0, tensor.Dimensions[0], h =>
+                {
+                    for (var y = 0; y < tensor.Dimensions[1]; y++)
+                    {
+                        tensor[h, y] *= tensor[h, y];
+                    }
+                });
+                break;
+            }
+            case 3:
+            {
+                break;
+            }
+        }
+
+        return tensor;
+    }
+
+    /// <summary>
+    /// build new diagonal array from flat array
+    /// </summary>
+    /// <param name="tensor"></param>
+    /// <returns></returns>
+    public static DenseTensor<float> Diag(DenseTensor<float> tensor)
+    {
+        int ndim = (int)tensor.Length;
+        DenseTensor<float> resulTensor = new DenseTensor<float>(new ReadOnlySpan<int>(new[] { ndim, ndim }));
+        switch (ndim)
+        {
+            case 1:
+            {
+                for (var x = 0; x < tensor.Length; x++)
+                {
+                    resulTensor[x, x] = tensor[x];
+                }
+
+                break;
+            }
+            case 2:
+            {
+                break;
+            }
+            case 3:
+            {
+                break;
+            }
+        }
+
+        return tensor;
+    }
+
+    public static DenseTensor<float> MultiplyTensor(DenseTensor<float> tensor1, DenseTensor<float> tensor2)
+    {
+        int ndim = tensor1.Rank;
+        DenseTensor<float> tensor3 = new DenseTensor<float>(tensor1.Dimensions);
+
+        Parallel.For(0, tensor1.Dimensions[0], i =>
+        {
+            for (int j = 0; j < tensor1.Dimensions[1]; j++)
+            {
+                for (int k = 0; k < tensor1.Dimensions[1]; k++)
+                {
+                    tensor3[i, j] += tensor1[i, k] * tensor2[k, j];
+                }
+            }
+        });
+
+        return tensor3;
+    }
+    /// <summary>
+    /// https://scicoding.com/how-to-calculate-cholesky-decomposition-in-python/
+    /// </summary>
+    /// <param name="tensor"></param>
+    /// <returns></returns>
+    public static DenseTensor<float> Cholesky(DenseTensor<float> tensor)
+    {
+        DenseTensor<float> resulTensor = new DenseTensor<float>(tensor.Dimensions);
+
+        Parallel.For(0, 4, i =>
+        {
+            for (int j = 0; j < i+1; j++)
+            {
+                float sum = 0;
+                for (int k = 0; k < j+1; k++)
+                {
+                    sum += resulTensor[i, k] * resulTensor[j, k];
+                }
+
+                if (i == j)
+                {
+                    resulTensor[i, j] = (float)Math.Sqrt(tensor[i, j] - sum);
+                }
+                else
+                {
+                    resulTensor[i, j] = 1.0f / resulTensor[j, j] * (tensor[i, j] - sum);
+                }
+            }
+        });
+
+        return resulTensor;
     }
 }
