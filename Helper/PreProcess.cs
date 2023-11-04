@@ -95,12 +95,12 @@ public abstract class PreProcess
 
         Parallel.For(0, shape[1], y =>
         {
-            Parallel.For(0, shape[2], x =>
+            for (var x = 0; x< shape[2]; x++)
             {
                 feed[0, y, x] = image[x, y].R;
                 feed[1, y, x] = image[x, y].G;
                 feed[2, y, x] = image[x, y].B;
-            });
+            };
         });
 
         return feed;
@@ -170,5 +170,11 @@ public abstract class PreProcess
             });
         });
         return outputImage;
+    }
+
+    public static DenseTensor<float> Stream2Tensor(MemoryStream memoryStream)
+    {
+        using Image<Rgb24> image = Image.Load<Rgb24>(memoryStream);
+        return Image2DenseTensor(image);
     }
 }

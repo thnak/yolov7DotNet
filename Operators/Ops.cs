@@ -100,17 +100,20 @@ public abstract class Ops
     /// <returns></returns>
     public static DenseTensor<float> Mul(DenseTensor<float> tensor1, DenseTensor<float> tensor2)
     {
-        int[] dim = tensor1.Dimensions.ToArray();
-        Parallel.For(0, dim[1], x =>
+        DenseTensor<float> tensor3 = new DenseTensor<float>(tensor1.Dimensions);
+
+        Parallel.For(0, tensor1.Dimensions[0], i =>
         {
-            for (int y = 0; y < dim[2]; y++)
+            for (int j = 0; j < tensor1.Dimensions[1]; j++)
             {
-                tensor1[0, x, y] *= tensor2[0, x, y];
-                tensor1[1, x, y] *= tensor2[0, x, y];
-                tensor1[2, x, y] *= tensor2[0, x, y];
+                for (int k = 0; k < tensor1.Dimensions[1]; k++)
+                {
+                    tensor3[i, j] += tensor1[i, k] * tensor2[k, j];
+                }
             }
         });
-        return tensor1;
+
+        return tensor3;
     }
 
     /// <summary>
@@ -290,11 +293,11 @@ public abstract class Ops
     {
         int[] fim_first = tensors.First().Dimensions.ToArray();
         int[] dim = new[] { tensors.Count, fim_first[0], fim_first[1], fim_first[2] };
-        DenseTensor<float> value = new DenseTensor<float>(tensors.Count);
+        DenseTensor<float> value = new DenseTensor<float>(dim);
 
-        Parallel.For(0, fim_first[1], i =>
+        Parallel.For(0, fim_first[1], x =>
         {
-            for (int x = 0; x < fim_first[2]; x++)
+            for (int i = 0; i < fim_first[2]; i++)
             {
                 for (int y = 0; y < tensors.Count; y++)
                 {
@@ -509,39 +512,22 @@ public abstract class Ops
         return tensor;
     }
 
-    public static DenseTensor<float> MultiplyTensor(DenseTensor<float> tensor1, DenseTensor<float> tensor2)
-    {
-        int ndim = tensor1.Rank;
-        DenseTensor<float> tensor3 = new DenseTensor<float>(tensor1.Dimensions);
 
-        Parallel.For(0, tensor1.Dimensions[0], i =>
-        {
-            for (int j = 0; j < tensor1.Dimensions[1]; j++)
-            {
-                for (int k = 0; k < tensor1.Dimensions[1]; k++)
-                {
-                    tensor3[i, j] += tensor1[i, k] * tensor2[k, j];
-                }
-            }
-        });
-
-        return tensor3;
-    }
     /// <summary>
     /// https://scicoding.com/how-to-calculate-cholesky-decomposition-in-python/
     /// </summary>
     /// <param name="tensor"></param>
     /// <returns></returns>
-    public static DenseTensor<float> Cholesky(DenseTensor<float> tensor)
+    public static DenseTensor<float> CholeskyFactory(DenseTensor<float> tensor)
     {
         DenseTensor<float> resulTensor = new DenseTensor<float>(tensor.Dimensions);
 
         Parallel.For(0, 4, i =>
         {
-            for (int j = 0; j < i+1; j++)
+            for (int j = 0; j < i + 1; j++)
             {
                 float sum = 0;
-                for (int k = 0; k < j+1; k++)
+                for (int k = 0; k < j + 1; k++)
                 {
                     sum += resulTensor[i, k] * resulTensor[j, k];
                 }
@@ -559,4 +545,22 @@ public abstract class Ops
 
         return resulTensor;
     }
+
+    public static double[] Solve(double[][] L, double[] b)
+    {
+        int n = L.Length;
+        double[] y = new double[n];
+        for (int i = 0; i < n; i++)
+        {
+            y[i] = b[i] / L[i][i];
+            for (int j = 0; j < i; j++)
+            {
+                y[i] -= L[i][j] * y[j];
+            }
+        }
+
+        return y;
+    }
+
+   
 }

@@ -61,7 +61,7 @@ namespace yolov7DotNet.ModelsHelper
 
             DenseTensor<float> motion_cov = Operators.Ops.Diag(Operators.Ops.concatenateFlatten(std_pos, std_vel));
 
-            covariance = Operators.Ops.MultiplyTensor(_motion_mat_dual, covariance);
+            covariance = Operators.Ops.Mul(_motion_mat_dual, covariance);
 
             return (mean, covariance);
         }
@@ -79,7 +79,7 @@ namespace yolov7DotNet.ModelsHelper
 
 
             DenseTensor<float> innovation_cov = Operators.Ops.Diag(Operators.Ops.Square(std_));
-            mean = Operators.Ops.MultiplyTensor(_update_mat, mean);
+            mean = Operators.Ops.Mul(_update_mat, mean);
 
             DenseTensor<float> updatemat = new DenseTensor<float>(new ReadOnlySpan<int>(new[] { 4, 4 }));
 
@@ -100,7 +100,7 @@ namespace yolov7DotNet.ModelsHelper
             DenseTensor<float> projected_mean = _project.Item1;
             DenseTensor<float> projected_cov = _project.Item2;
 
-
+            return (projected_cov, projected_cov);
         }
     }
 }

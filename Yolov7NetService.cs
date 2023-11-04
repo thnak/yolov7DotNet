@@ -154,7 +154,7 @@ public abstract class Yolov7NetService
         }
 
         /// <summary>
-        /// 
+        /// release unused resource
         /// </summary>
         public void Dispose()
         {
@@ -188,8 +188,8 @@ public abstract class Yolov7NetService
         Task<List<Models.Yolov7Predict>> InferenceAsync(Stream stream);
         Task<List<Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor);
         List<string> GetAvailableProviders();
-        void SetExcutionProvider(Yolov7NetService.ExecutionProvider ex, Yolov7NetService.Yolov7Weights? weight, byte[]? byteWeight);
-        Task<float> WarmUp(int cycle, int[] shape);
+        void SetExcutionProvider(ExecutionProvider ex, Yolov7Weights? weight, byte[]? byteWeight);
+        Task<float> WarmUp(int cycle,int batchSize);
     }
 
     /// <summary>
@@ -267,38 +267,38 @@ public abstract class Yolov7NetService
             {
                 case "CUDAExecutionProvider":
                 {
-                    SetExcutionProvider(Yolov7NetService.ExecutionProvider.CUDA, weight, byteWeight);
+                    SetExcutionProvider(ExecutionProvider.CUDA, weight, byteWeight);
                     break;
                 }
                 case "TensorrtExecutionProvider":
                 {
-                    SetExcutionProvider(Yolov7NetService.ExecutionProvider.TensorRT, weight, byteWeight);
+                    SetExcutionProvider(ExecutionProvider.TensorRT, weight, byteWeight);
                     break;
                 }
                 case "DNNLExecutionProvider":
                 {
-                    SetExcutionProvider(Yolov7NetService.ExecutionProvider.DNNL, weight, byteWeight);
+                    SetExcutionProvider(ExecutionProvider.DNNL, weight, byteWeight);
                     break;
                 }
                 case "OpenVINOExecutionProvider":
                 {
-                    SetExcutionProvider(Yolov7NetService.ExecutionProvider.OpenVINO, weight, byteWeight);
+                    SetExcutionProvider(ExecutionProvider.OpenVINO, weight, byteWeight);
 
                     break;
                 }
                 case "DmlExecutionProvider":
                 {
-                    SetExcutionProvider(Yolov7NetService.ExecutionProvider.DML, weight, byteWeight);
+                    SetExcutionProvider(ExecutionProvider.DML, weight, byteWeight);
                     break;
                 }
                 case "ROCMExecutionProvider":
                 {
-                    SetExcutionProvider(Yolov7NetService.ExecutionProvider.ROCm, weight, byteWeight);
+                    SetExcutionProvider(ExecutionProvider.ROCm, weight, byteWeight);
                     break;
                 }
                 default:
                 {
-                    SetExcutionProvider(Yolov7NetService.ExecutionProvider.CPU, weight, byteWeight);
+                    SetExcutionProvider(ExecutionProvider.CPU, weight, byteWeight);
                     break;
                 }
             }
@@ -446,7 +446,7 @@ public abstract class Yolov7NetService
                     TheLogger($"[{_prefix}][INIT][ExecutionProvider][CPU]");
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.CUDA:
+                case ExecutionProvider.CUDA:
                 {
                     _sessionOptions = DefaultOptions();
                     OrtCUDAProviderOptions providerOptions = new OrtCUDAProviderOptions();
@@ -478,17 +478,17 @@ public abstract class Yolov7NetService
 
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.Azure:
+                case ExecutionProvider.Azure:
                 {
                     _sessionOptions = DefaultOptions();
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.CoreML:
+                case ExecutionProvider.CoreML:
                 {
                     _sessionOptions = DefaultOptions();
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.DML:
+                case ExecutionProvider.DML:
                 {
                     _sessionOptions = DefaultOptions();
                     _sessionOptions.EnableMemoryPattern = false;
@@ -497,27 +497,27 @@ public abstract class Yolov7NetService
                     TheLogger($"[{_prefix}][INIT][ExecutionProvider][Dml]");
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.NNAPI:
+                case ExecutionProvider.NNAPI:
                 {
                     _sessionOptions = DefaultOptions();
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.OpenCL:
+                case ExecutionProvider.OpenCL:
                 {
                     _sessionOptions = DefaultOptions();
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.QNN:
+                case ExecutionProvider.QNN:
                 {
                     _sessionOptions = DefaultOptions();
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.XNNPACK:
+                case ExecutionProvider.XNNPACK:
                 {
                     _sessionOptions = DefaultOptions();
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.OpenVINO:
+                case ExecutionProvider.OpenVINO:
                 {
                     _sessionOptions = DefaultOptions();
                     _sessionOptions.AppendExecutionProvider_OpenVINO();
@@ -531,7 +531,7 @@ public abstract class Yolov7NetService
                     _sessionOptions = DefaultOptions();
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.DNNL:
+                case ExecutionProvider.DNNL:
                 {
                     _sessionOptions = DefaultOptions();
                     _sessionOptions.AppendExecutionProvider_Dnnl();
@@ -539,7 +539,7 @@ public abstract class Yolov7NetService
 
                     break;
                 }
-                case Yolov7NetService.ExecutionProvider.ROCm:
+                case ExecutionProvider.ROCm:
                 {
                     _sessionOptions = DefaultOptions();
                     OrtROCMProviderOptions provider = new();
@@ -593,6 +593,8 @@ public abstract class Yolov7NetService
                 TheLogger($"[{_prefix}][INIT][Yolov7Weights][yolov7_tiny]");
             }
 
+            OrtIoBinding ioBinding = _session.CreateIoBinding();
+            _session.RunWithBoundResults(_runOptions, ioBinding);
             var metadata = _session?.ModelMetadata;
             var customMetadata = metadata?.CustomMetadataMap;
             Debug.Assert(customMetadata != null, nameof(customMetadata) + " != null");
@@ -657,21 +659,14 @@ public abstract class Yolov7NetService
         /// 
         /// </summary>
         /// <param name="cycle">total number loop</param>
-        /// <param name="shape">tensor shape</param>
-        /// <returns></returns>
-        public async Task<float> WarmUp(int cycle, int[] shape)
+        /// <param name="batchSize">tensor batch size</param>
+        /// <returns>ElapsedMilliseconds during the entire loop</returns>
+        public async Task<float> WarmUp(int cycle, int batchSize)
         {
             Stopwatch sw = Stopwatch.StartNew();
             sw.Start();
-            if (shape.Length == 3)
-            {
-                shape = new[] { 1, shape[0], shape[1], shape[2] };
-            }
+            var shape = new[] { batchSize, _inputShape[1], _inputShape[2], _inputShape[3] };
 
-            if (shape.Length != 4)
-            {
-                shape = _inputShape;
-            }
 
             var dtype = _session.InputMetadata.Values.First().ElementDataType;
             if (dtype == TensorElementType.Float16)
@@ -705,7 +700,7 @@ public abstract class Yolov7NetService
         }
 
         /// <summary>
-        /// 
+        /// release unused resource
         /// </summary>
         public void Dispose()
         {
