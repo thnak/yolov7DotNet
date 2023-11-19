@@ -1,13 +1,12 @@
 using System.Diagnostics;
-using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using Newtonsoft.Json;
 using yolov7DotNet.Helper;
 using yolov7DotNet.ModelsHelper;
-using yolov7DotNet.Operators;
 
 namespace yolov7DotNet;
 
@@ -187,9 +186,12 @@ public abstract class Yolov7NetService
         Task<List<Models.Yolov7Predict>> InferenceAsync(string fileDir);
         Task<List<Models.Yolov7Predict>> InferenceAsync(Stream stream);
         Task<List<Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor);
+        Task<List<Models.Yolov7Predict>> InferenceAsync(TensorFeed tensor);
         List<string> GetAvailableProviders();
         void SetExcutionProvider(ExecutionProvider ex, Yolov7Weights? weight, byte[]? byteWeight);
-        Task<float> WarmUp(int cycle,int batchSize);
+        Task<float> WarmUp(int cycle, int batchSize);
+        void SetCategory(List<string> categories);
+        void SetStride(int stride);
     }
 
     /// <summary>
@@ -199,7 +201,7 @@ public abstract class Yolov7NetService
     {
         private readonly string _prefix = Properties.Resources.prefix;
         private SessionOptions _sessionOptions;
-        private InferenceSession _session;
+        public InferenceSession _session;
         private RunOptions _runOptions;
         private List<string> _categories;
         private IEnumerable<string> _inputNames;
@@ -208,9 +210,10 @@ public abstract class Yolov7NetService
         private bool _disposed;
         private IMemoryCache MemoryCache { get; set; }
 
-        private int[] _inputShape;
+        public int[] _inputShape;
         private readonly IJSRuntime? _jsRuntime;
         private readonly ILogger<Yolov7>? _logger;
+        public OrtIoBinding irtIoBinding;
 
         public Yolov7() : this(weight: Yolov7NetService.Yolov7Weights.Yolov7Tiny, jsRuntime: null, byteWeight: null, logger: null)
         {
@@ -356,7 +359,9 @@ public abstract class Yolov7NetService
         public async Task<List<Models.Yolov7Predict>> InferenceAsync(Image<Rgb24> image)
         {
             var tensorFeed = PreProcess.Image2DenseTensor(image);
-            return await InferenceAsync(tensorFeed);
+            TensorFeed feed = new TensorFeed(new[] { _inputShape[2], _inputShape[3] }, Stride);
+            await feed.SetTensorAsync(tensorFeed);
+            return await RunNet(feed);
         }
 
         /// <summary>
@@ -366,12 +371,19 @@ public abstract class Yolov7NetService
         /// <returns></returns>
         public async Task<List<Models.Yolov7Predict>> InferenceAsync(DenseTensor<float> tensor)
         {
-            var imageShape = tensor.Dimensions[1..].ToArray();
-            var lettered = PreProcess.LetterBox(tensor, false, false, true, Stride, new[] { _inputShape[2], _inputShape[3] });
+            TensorFeed feed = new TensorFeed(new[] { _inputShape[2], _inputShape[3] }, Stride);
+            await feed.SetTensorAsync(tensor);
+            return await RunNet(feed);
+        }
 
-            var feedTensor = Ops.ExpandDim(Ops.Div(lettered.Item1, 255f));
-
-            return await RunNet(feedTensor, new List<float[]>() { lettered.Item3 }, new List<float[]>() { lettered.Item2 }, new List<int[]>() { imageShape });
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="tensor"></param>
+        /// <returns></returns>
+        public async Task<List<Models.Yolov7Predict>> InferenceAsync(TensorFeed tensor)
+        {
+            return await RunNet(tensor);
         }
 
         /// <summary>
@@ -419,6 +431,29 @@ public abstract class Yolov7NetService
             Models.Predictions predictions = new Models.Predictions(resultArrays, _categories.ToArray(), dhdws, ratios, imageShapes);
             return predictions.GetDetect();
         }
+
+        /// <summary>
+        /// start inference and return the predictions, support dynamic batch
+        /// </summary>
+        /// <param name="tensorFeed"></param>
+        /// <returns></returns>
+        public async Task<List<Models.Yolov7Predict>> RunNet(TensorFeed tensorFeed)
+        {
+            var feed = await tensorFeed.GetTensorAsync();
+            DenseTensor<float> tensor = feed.Item1;
+            long[] newDim = new[] { (long)tensor.Dimensions[0], tensor.Dimensions[1], tensor.Dimensions[2], tensor.Dimensions[3] };
+            var inputOrtValue = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, tensor.Buffer, newDim);
+            var inputs = new Dictionary<string, OrtValue> { { _inputNames.First(), inputOrtValue } };
+
+            var fromResult = await Task.FromResult(_session.Run(_runOptions, inputs, _outputNames));
+
+            float[] resultArrays = fromResult[0].Value.GetTensorDataAsSpan<float>().ToArray();
+            inputOrtValue.Dispose();
+            fromResult.Dispose();
+            Models.Predictions predictions = new Models.Predictions(resultArrays, _categories.ToArray(), feed.Item2, feed.Item3, feed.Item4);
+            return predictions.GetDetect();
+        }
+
 
         /// <summary>
         /// GetAvailableProviders
@@ -561,13 +596,13 @@ public abstract class Yolov7NetService
             {
                 switch (weight)
                 {
-                    case Yolov7NetService.Yolov7Weights.Yolov7:
+                    case Yolov7Weights.Yolov7:
                     {
                         _session = new InferenceSession(Properties.Resources.yolov7, _sessionOptions, prepackedWeightsContainer);
                         TheLogger($"[{_prefix}][INIT][Yolov7Weights][yolov7]");
                         break;
                     }
-                    case Yolov7NetService.Yolov7Weights.Yolov7Tiny:
+                    case Yolov7Weights.Yolov7Tiny:
                     {
                         _session = new InferenceSession(Properties.Resources.yolov7_tiny, _sessionOptions, prepackedWeightsContainer);
                         TheLogger($"[{_prefix}][INIT][Yolov7Weights][yolov7_tiny]");
@@ -593,18 +628,42 @@ public abstract class Yolov7NetService
                 TheLogger($"[{_prefix}][INIT][Yolov7Weights][yolov7_tiny]");
             }
 
-            OrtIoBinding ioBinding = _session.CreateIoBinding();
-            _session.RunWithBoundResults(_runOptions, ioBinding);
+            irtIoBinding = _session.CreateIoBinding();
+
             var metadata = _session?.ModelMetadata;
             var customMetadata = metadata?.CustomMetadataMap;
-            Debug.Assert(customMetadata != null, nameof(customMetadata) + " != null");
             if (customMetadata.TryGetValue("names", out var categories))
             {
-                var content = JsonSerializer.Deserialize<List<string>>(categories);
-                if (content != null) _categories = content;
+                if (categories != null)
+                {
+                    try
+                    {
+                        var content = JsonConvert.DeserializeObject<List<string>>(categories);
+
+                        if (content != null) _categories = content;
+                        else
+                        {
+                            TheLogger($"[{_prefix}][Init][ERROR] not found categories in model metadata, creating name with syntax Named[ ? ]");
+                            _categories = new List<string>();
+                            for (var i = 0; i < 10000; i++)
+                            {
+                                _categories.Add($"Named[ {i} ]");
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        TheLogger($"[{_prefix}][Init][ERROR] not found categories in model metadata, creating name with syntax Named[ ? ]");
+                        _categories = new List<string>();
+                        for (var i = 0; i < 10000; i++)
+                        {
+                            _categories.Add($"Named[ {i} ]");
+                        }
+                    }
+                }
                 else
                 {
-                    TheLogger($"[{_prefix}][Init][ERROR] not found categories in model metadata, creating name with syntax Named[?]");
+                    TheLogger($"[{_prefix}][Init][ERROR] not found categories in model metadata, creating name with syntax Named[ ? ]");
                     _categories = new List<string>();
                     for (var i = 0; i < 10000; i++)
                     {
@@ -624,8 +683,24 @@ public abstract class Yolov7NetService
 
             if (customMetadata.TryGetValue("stride", out string? stride))
             {
-                var content = JsonSerializer.Deserialize<List<float>>(stride);
-                if (content != null) Stride = (int)content.Last();
+                if (stride != null)
+                {
+                    try
+                    {
+                        var content = JsonConvert.DeserializeObject<List<float>>(stride);
+                        if (content != null) Stride = (int)content.Last();
+                    }
+                    catch
+                    {
+                        Stride = 32;
+                        TheLogger($"[{_prefix}][Init][ERROR][STRIDE] not found stride, set to default 32");
+                    }
+                }
+                else
+                {
+                    Stride = 32;
+                    TheLogger($"[{_prefix}][Init][ERROR][STRIDE] not found stride, set to default 32");
+                }
             }
             else
             {
@@ -674,7 +749,9 @@ public abstract class Yolov7NetService
                 DenseTensor<Float16> tensor = new DenseTensor<Float16>(shape);
                 List<float[]> dwdh = new List<float[]>() { { new[] { 0f, 0 } } };
                 List<float[]> ratio = new List<float[]>() { { new[] { 1f, 1 } } };
+
                 List<int[]> imageShape = new List<int[]>() { { new[] { _inputShape[0], _inputShape[1] } } };
+
                 for (int i = 0; i < cycle; i++)
                 {
                     await RunNet(tensor, dwdh, ratio, imageShape);
@@ -686,17 +763,36 @@ public abstract class Yolov7NetService
             else
             {
                 DenseTensor<float> tensor = new DenseTensor<float>(shape);
+
                 List<float[]> dwdh = new List<float[]>() { { new[] { 0f, 0 } } };
                 List<float[]> ratio = new List<float[]>() { { new[] { 1f, 1 } } };
                 List<int[]> imageShape = new List<int[]>() { { new[] { _inputShape[0], _inputShape[1] } } };
+
+                long[] newDim = new[] { (long)tensor.Dimensions[0], tensor.Dimensions[1], tensor.Dimensions[2], tensor.Dimensions[3] };
+                var inputOrtValue = OrtValue.CreateTensorValueFromMemory(OrtMemoryInfo.DefaultInstance, tensor.Buffer, newDim);
+
+                irtIoBinding.BindInput(_inputNames.First(), inputOrtValue);
+                irtIoBinding.BindOutputToDevice(_outputNames.Last(), OrtMemoryInfo.DefaultInstance);
+                irtIoBinding.SynchronizeBoundInputs();
+                
                 for (int i = 0; i < cycle; i++)
                 {
-                    await RunNet(tensor, dwdh, ratio, imageShape);
+                    using var a = _session.RunWithBoundResults(_runOptions, irtIoBinding);
                 }
 
                 sw.Stop();
                 return sw.ElapsedMilliseconds;
             }
+        }
+
+        public void SetCategory(List<string> categories)
+        {
+            _categories = categories;
+        }
+
+        public void SetStride(int stride)
+        {
+            Stride = stride;
         }
 
         /// <summary>
@@ -757,7 +853,7 @@ public abstract class Yolov7NetService
         sessionOptions.EnableProfiling = false;
         sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
         sessionOptions.ExecutionMode = ExecutionMode.ORT_PARALLEL;
-        sessionOptions.OptimizedModelFilePath = "D:\\Documents\\GitHub\\yolov7DotNet\\yolov7DotNet.onnx";
+        // sessionOptions.OptimizedModelFilePath = "D:\\Documents\\GitHub\\yolov7DotNet\\yolov7DotNet.onnx";
         return sessionOptions;
     }
 }

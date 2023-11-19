@@ -1,6 +1,4 @@
-﻿using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Imaging;
+﻿using System.Drawing;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -291,22 +289,45 @@ public abstract class Ops
     /// <returns></returns>
     public static DenseTensor<float> Concat(List<DenseTensor<float>> tensors)
     {
-        int[] fim_first = tensors.First().Dimensions.ToArray();
-        int[] dim = new[] { tensors.Count, fim_first[0], fim_first[1], fim_first[2] };
+        int tensorsCount = tensors.Count;
+
+        int[] fimFirst = tensors.First().Dimensions.ToArray();
+        int rank = tensors.First().Rank;
+        int[] dim = rank == 3 ? new[] { tensorsCount, fimFirst[0], fimFirst[1], fimFirst[2] } : new[] { tensorsCount, fimFirst[1], fimFirst[2], fimFirst[3] };
+
         DenseTensor<float> value = new DenseTensor<float>(dim);
 
-        Parallel.For(0, fim_first[1], x =>
+        if (rank == 3)
         {
-            for (int i = 0; i < fim_first[2]; i++)
+            Parallel.For(0, fimFirst[1], x =>
             {
-                for (int y = 0; y < tensors.Count; y++)
+                for (int i = 0; i < fimFirst[2]; i++)
                 {
-                    value[y, 0, x, i] = tensors[y][0, x, i];
-                    value[y, 1, x, i] = tensors[y][1, x, i];
-                    value[y, 2, x, i] = tensors[y][2, x, i];
+                    for (int y = 0; y < tensorsCount; y++)
+                    {
+                        value[y, 0, x, i] = tensors[y][0, x, i];
+                        value[y, 1, x, i] = tensors[y][1, x, i];
+                        value[y, 2, x, i] = tensors[y][2, x, i];
+                    }
                 }
-            }
-        });
+            });
+        }
+        else
+        {
+            Parallel.For(0, fimFirst[2], x =>
+            {
+                for (int i = 0; i < fimFirst[3]; i++)
+                {
+                    for (int y = 0; y < tensorsCount; y++)
+                    {
+                        value[y, 0, x, i] = tensors[y][0, 0, x, i];
+                        value[y, 1, x, i] = tensors[y][0, 1, x, i];
+                        value[y, 2, x, i] = tensors[y][0, 2, x, i];
+                    }
+                }
+            });
+        }
+
 
         return value;
     }
@@ -561,6 +582,4 @@ public abstract class Ops
 
         return y;
     }
-
-   
 }

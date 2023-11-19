@@ -1,8 +1,5 @@
-using System.Collections;
-using System.Diagnostics;
-using System.Runtime.CompilerServices;
-using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenCvSharp;
+using yolov7DotNet.ModelsHelper;
 
 namespace yolov7DotNet.DataLoader;
 
@@ -13,9 +10,11 @@ public class VideoDataLoader
     private int Height { get; set; }
     private int Width { get; set; }
     private float Fps { get; set; }
-    private int[] Dim { get; set; }
+    
+    private int[] OutputShape { get; set; }
+    private int Stride { get; set; }
 
-    public VideoDataLoader(int batchSize,int? cameraIdx, string? fileString, string? autoInt)
+    public VideoDataLoader(int batchSize,int? cameraIdx, string? fileString, string? autoInt, int[] outputShape, int stride)
     {
         if (cameraIdx is not null) {VideoCapture = VideoCapture.FromCamera((int)cameraIdx);}
         if(fileString != null) {VideoCapture = VideoCapture.FromFile(fileString);}
@@ -29,27 +28,61 @@ public class VideoDataLoader
         Width = VideoCapture.FrameWidth;
         Fps = (float)VideoCapture.Fps;
         BatchSize = batchSize;
-        Dim = new[] { batchSize, 3, Height, Width };
+        OutputShape = outputShape;
+        Stride = stride;
     }
-    
-    public IEnumerator<DenseTensor<float>> GetEnumerator()
+
+   
+    public IEnumerator<TensorFeed> GetEnumerator()
     {
-        DenseTensor<float> tensor;
-        List<DenseTensor<float>> listTensor = new List<DenseTensor<float>>();
-        while (VideoCapture.IsOpened())
+        if (BatchSize == 1)
         {
-            Mat frame = VideoCapture.RetrieveMat();
-            Cv2.CvtColor(frame, frame, ColorConversionCodes.BGR2RGB);
-            var read = Helper.PreProcess.Stream2Tensor(frame.ToMemoryStream());
-            if (listTensor.Count() < BatchSize)
+            while (VideoCapture.IsOpened())
             {
-                listTensor.Add(read);
+                Mat frame = VideoCapture.RetrieveMat();
+                if (frame == null)
+                {
+                    break;
+                }
+                
+                Cv2.CvtColor(frame, frame, ColorConversionCodes.BGR2RGB);
+                var read = Helper.PreProcess.Stream2Tensor(frame.ToMemoryStream());
+                TensorFeed tensorFeed = new TensorFeed(OutputShape, Stride);
+                tensorFeed.SetTensor(read);
+                yield return tensorFeed;
             }
-            else
+        }
+        else
+        {
+            int counting = 0;
+            TensorFeed tensorFeed = new TensorFeed(OutputShape, Stride);
+            while (VideoCapture.IsOpened())
             {
-                tensor = Operators.Ops.Concat(listTensor);
-                listTensor = new List<DenseTensor<float>>();
-                yield return tensor;
+                Mat frame = VideoCapture.RetrieveMat();
+                if (frame == null)
+                {
+                    break;
+                }
+                 
+                Cv2.CvtColor(frame, frame, ColorConversionCodes.BGR2RGB);
+                var read = Helper.PreProcess.Stream2Tensor(frame.ToMemoryStream());
+                if (counting < BatchSize)
+                {
+                    tensorFeed.SetTensor(read);
+                    counting++;
+                }
+                else
+                {
+                    try
+                    {
+                        yield return tensorFeed;
+                    }
+                    finally
+                    {
+                        tensorFeed = new TensorFeed(OutputShape, Stride);
+                        counting = 0;
+                    }
+                }
             }
         }
     }

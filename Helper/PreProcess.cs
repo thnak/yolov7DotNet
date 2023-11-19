@@ -1,4 +1,8 @@
+using BenchmarkDotNet.Attributes;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using Numpy;
+using OpenCvSharp;
+using Size = OpenCvSharp.Size;
 
 namespace yolov7DotNet.Helper;
 
@@ -78,8 +82,50 @@ public abstract class PreProcess
                 feed[2, x + top, y + left] = image[2, x, y];
             });
         });
-        
+
         return (feed, ratio, dhdw);
+    }
+
+    public static (Mat, float[], float[]) LetterBox(Mat image,
+        bool auto, bool scaleFill, bool scaleUp, int stride, int[] shapes)
+    {
+        Mat resultImage = new Mat();
+        image.CopyTo(resultImage, image);
+        float r = Math.Min((float)shapes[0] / image.Height, (float)shapes[1] / image.Width);
+        if (!scaleUp)
+        {
+            r = Math.Min(r, 1.0f);
+        }
+
+        float[] ratio = new[] { r, r };
+        int[] newUnPad = new[] { (int)Math.Round(image.Height * r), (int)Math.Round(image.Width * r) };
+        float[] dhdw = new[] { shapes[0] - newUnPad[0], (float)(shapes[1] - newUnPad[1]) };
+
+        if (auto)
+        {
+            dhdw = new[] { dhdw[0] % stride, dhdw[1] % stride };
+        }
+        else if (scaleFill)
+        {
+            dhdw = new[] { 0f, 0f };
+            newUnPad = new[] { shapes[0], shapes[1] };
+            ratio = new[] { (float)shapes[0] / image.Height, (float)shapes[1] / image.Width };
+        }
+
+        dhdw[0] /= 2;
+        dhdw[1] /= 2;
+        if (image.Height != newUnPad[0] && image.Width != newUnPad[1])
+        {
+            Size size = new Size() { Height = newUnPad[0], Width = newUnPad[1] };
+            Cv2.Resize(resultImage, resultImage, size, interpolation: InterpolationFlags.Linear);
+        }
+
+        int left = (int)Math.Round(dhdw[1] - 0.1f);
+        int right = (int)Math.Round(dhdw[1] + 0.1f);
+        int top = (int)Math.Round(dhdw[0] - 0.1f);
+        int bottom = (int)Math.Round(dhdw[0] + 0.1f);
+        Cv2.CopyMakeBorder(resultImage, resultImage, top, bottom, left, right, BorderTypes.Constant, new Scalar(144));
+        return (resultImage, ratio, dhdw);
     }
 
     /// <summary>
@@ -95,12 +141,14 @@ public abstract class PreProcess
 
         Parallel.For(0, shape[1], y =>
         {
-            for (var x = 0; x< shape[2]; x++)
+            for (var x = 0; x < shape[2]; x++)
             {
                 feed[0, y, x] = image[x, y].R;
                 feed[1, y, x] = image[x, y].G;
                 feed[2, y, x] = image[x, y].B;
-            };
+            }
+
+            ;
         });
 
         return feed;
@@ -113,6 +161,7 @@ public abstract class PreProcess
     /// <param name="imageMatrix"></param>
     /// <param name="shape"></param>
     /// <returns></returns>
+    [Benchmark]
     public static DenseTensor<float> ResizeLinear(DenseTensor<float> imageMatrix, int[] shape)
     {
         int[] newShape = new[] { 3, shape[0], shape[1] };
@@ -172,6 +221,7 @@ public abstract class PreProcess
         return outputImage;
     }
 
+    [Benchmark]
     public static DenseTensor<float> Stream2Tensor(MemoryStream memoryStream)
     {
         using Image<Rgb24> image = Image.Load<Rgb24>(memoryStream);

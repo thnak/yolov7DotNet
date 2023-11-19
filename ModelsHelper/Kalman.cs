@@ -29,7 +29,7 @@ namespace yolov7DotNet.ModelsHelper
             DenseTensor<float> mean_vel = new DenseTensor<float>(measurement.Dimensions);
 
             DenseTensor<float> mean_ = Operators.Ops.concatenateFlatten(mean_pos, mean_vel);
-            DenseTensor<float> std = new DenseTensor<float>(new ReadOnlySpan<int>(8));
+            DenseTensor<float> std = new DenseTensor<float>(new ReadOnlySpan<int>(new []{8}));
 
             std[0] = 2 * _std_weight_position * measurement[0];
             std[1] = 2 * _std_weight_position * measurement[1];
@@ -68,7 +68,7 @@ namespace yolov7DotNet.ModelsHelper
 
         public static (DenseTensor<float>, DenseTensor<float>) project(DenseTensor<float> mean, DenseTensor<float> covariance, float confidence = 0f)
         {
-            DenseTensor<float> std_ = new DenseTensor<float>(new ReadOnlySpan<int>(4));
+            DenseTensor<float> std_ = new DenseTensor<float>(new ReadOnlySpan<int>(new []{4}));
             std_.Fill(_std_weight_position * mean[3]);
             std_[2] = 0.1f;
 
